@@ -30,4 +30,4 @@ vector_store/
 *.swo
 
 # Системные файлы
-Thumbs.db 
+Thumbs.db changes.patch
