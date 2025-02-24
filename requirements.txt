@@ -1,0 +1,10 @@
+aiogram>=3.0.0
+openai>=1.0.0
+python-dotenv>=0.19.0
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+python-telegram-bot
+langchain
+chromadb
+tiktoken 

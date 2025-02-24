@@ -1,0 +1,17 @@
+[Unit]
+Description=Google Drive Sync Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/TestBot
+Environment=PATH=/root/TestBot/venv/bin:$PATH
+EnvironmentFile=/root/TestBot/.env
+ExecStart=/root/TestBot/venv/bin/python3 -u google_drive_sync.py
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
