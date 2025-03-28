@@ -1,5 +1,5 @@
-venv_310_fixed/
 new_venv/
+venv_310_fixed/
 __pycache__/
 *.pyc
 *.pid
