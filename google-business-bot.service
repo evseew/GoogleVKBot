@@ -1,0 +1,16 @@
+[Unit]
+Description=Google Business Bot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/bot
+ExecStart=/bin/bash -c 'source /path/to/bot/new_venv/bin/activate && source /path/to/bot/.env && python /path/to/bot/bot.py'
+Restart=always
+RestartSec=10
+StandardOutput=append:/path/to/bot/logs/bot.log
+StandardError=append:/path/to/bot/logs/bot_error.log
+
+[Install]
+WantedBy=multi-user.target 

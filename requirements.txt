@@ -1,10 +1,23 @@
+# Основные библиотеки
 aiogram==3.3.0
+pydantic==2.5.3
+openai==1.64.0
 python-dotenv==1.0.0
-openai==1.12.0
-langchain==0.1.9
+
+# LangChain (новая структура)
+langchain-core==0.1.52
+langchain-community==0.0.38
+langchain-openai==0.0.1
 chromadb==0.4.22
-tiktoken==0.6.0
+
+# Выбираем один фреймворк - PyTorch (удаляем TensorFlow)
+transformers==4.30.0
+torch==2.1.0
+
+# Google Drive API
+google-auth==2.16.2
 google-api-python-client==2.118.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
-python-telegram-bot 
+
+# Обработка документов
+python-docx==1.1.0
+PyPDF2==3.0.1
