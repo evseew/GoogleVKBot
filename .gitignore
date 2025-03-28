@@ -1,33 +1,6 @@
-# Конфиденциальные данные
-.env
-credentials.json
-token.pickle
-
-# Кэш и временные файлы
+venv_310_fixed/
+new_venv/
 __pycache__/
 *.pyc
-.DS_Store
-
-# Виртуальное окружение
-venv/
-
-# Данные
-logs/
-data/
-vector_store/
-
-# Python
-*.py[cod]
-*$py.class
-
-# Логи
-*.log
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Системные файлы
-Thumbs.db changes.patch
+*.pid
+.env

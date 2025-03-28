@@ -1,0 +1,34 @@
+/Users/test/Documents/CODE/GoogleBusinessBot/new_venv/lib/python3.10/site-packages/langchain_community/llms/__init__.py:268: LangChainDeprecationWarning: As of langchain-core 0.3.0, LangChain uses pydantic v2 internally. The langchain_core.pydantic_v1 module was a compatibility shim for pydantic v1, and should no longer be used. Please update the code to import from Pydantic directly.
+
+For example, replace imports like: `from langchain_core.pydantic_v1 import BaseModel`
+with: `from pydantic import BaseModel`
+or the v1 compatibility namespace if you are working in a code base that has not been fully upgraded to pydantic 2 yet. 	from pydantic.v1 import BaseModel
+
+  from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
+/Users/test/Documents/CODE/GoogleBusinessBot/new_venv/lib/python3.10/site-packages/pydantic/_internal/_config.py:345: UserWarning: Valid config keys have changed in V2:
+* 'allow_population_by_field_name' has been renamed to 'populate_by_name'
+  warnings.warn(message, UserWarning)
+2025-03-21 19:25:21,340 - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-03-21 19:25:25,172 - INFO - Successfully read file: Addresses of Branches.pdf
+/Users/test/Documents/CODE/GoogleBusinessBot/new_venv/lib/python3.10/site-packages/langchain_openai/embeddings/base.py:153: UserWarning: WARNING! dimensions is not default parameter.
+                    dimensions was transferred to model_kwargs.
+                    Please confirm that dimensions is what you intended.
+  warnings.warn(
+2025-03-21 19:25:25,666 - INFO - Anonymized telemetry enabled. See                     https://docs.trychroma.com/telemetry for more information.
+2025-03-21 19:25:25,772 - WARNING - Warning: model not found. Using cl100k_base encoding.
+2025-03-21 19:25:27,031 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+Python: 3.10.16 (main, Dec  3 2024, 17:27:57) [Clang 16.0.0 (clang-1600.0.26.4)]
+Python path: /Users/test/Documents/CODE/GoogleBusinessBot/new_venv/bin/python
+Virtual env: /Users/test/Documents/CODE/GoogleBusinessBot/new_venv
+Working directory: /Users/test/Documents/CODE/GoogleBusinessBot
+Используем OpenAI Embeddings вместо sentence-transformers
+Запускаем обновление базы с исправленной функцией...
+Загружаем документы из Google Drive...
+Загружено 1 документов
+Разбиваем документы на фрагменты...
+Создано 1 фрагментов текста
+Удаляем старую базу данных...
+Создаем новую векторную базу...
+✓ База данных создана и содержит 1 записей
+✅ База данных успешно обновлена!
+Добавлено 1 фрагментов из 1 документов

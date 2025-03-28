@@ -1,0 +1,27 @@
+/Users/test/Documents/CODE/GoogleBusinessBot/new_venv/lib/python3.10/site-packages/langchain_openai/chat_models/__init__.py:1: LangChainDeprecationWarning: As of langchain-core 0.3.0, LangChain uses pydantic v2 internally. The langchain_core.pydantic_v1 module was a compatibility shim for pydantic v1, and should no longer be used. Please update the code to import from Pydantic directly.
+
+For example, replace imports like: `from langchain_core.pydantic_v1 import BaseModel`
+with: `from pydantic import BaseModel`
+or the v1 compatibility namespace if you are working in a code base that has not been fully upgraded to pydantic 2 yet. 	from pydantic.v1 import BaseModel
+
+  from langchain_openai.chat_models.azure import AzureChatOpenAI
+/Users/test/Documents/CODE/GoogleBusinessBot/new_venv/lib/python3.10/site-packages/pydantic/_internal/_config.py:345: UserWarning: Valid config keys have changed in V2:
+* 'allow_population_by_field_name' has been renamed to 'populate_by_name'
+  warnings.warn(message, UserWarning)
+2025-03-28 11:04:18,477 - INFO - 🚀 Запуск бота...
+2025-03-28 11:04:18,477 - INFO - 📁 Проверка подключения к Google Drive...
+2025-03-28 11:04:18,479 - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-03-28 11:04:18,480 - INFO - ✅ Подключение к Google Drive успешно
+2025-03-28 11:04:18,480 - INFO - 🤖 Бот готов к работе
+2025-03-28 11:04:18,480 - INFO - 💼 Базовая поддержка бизнес-режима
+2025-03-28 11:04:18,480 - INFO - Start polling
+2025-03-28 11:04:18,482 - INFO - Очистка логов: удалено 0 устаревших файлов контекста
+2025-03-28 11:04:19,840 - INFO - Run polling for bot @PEmessageBot id=7755359339 - 'PEmessageBot'
+2025-03-28 11:05:28,166 - WARNING - Received SIGTERM signal
+2025-03-28 11:05:28,178 - INFO - Polling stopped for bot @PEmessageBot id=7755359339 - 'PEmessageBot'
+2025-03-28 11:05:28,179 - INFO - Polling stopped
+Python: 3.10.16 (main, Dec  3 2024, 17:27:57) [Clang 16.0.0 (clang-1600.0.26.4)]
+Python path: /Users/test/Documents/CODE/GoogleBusinessBot/new_venv/bin/python3
+Virtual env: /Users/test/Documents/CODE/GoogleBusinessBot/new_venv
+Working directory: /Users/test/Documents/CODE/GoogleBusinessBot
+Используем OpenAI Embeddings вместо sentence-transformers
