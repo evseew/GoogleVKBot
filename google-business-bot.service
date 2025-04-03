@@ -1,16 +1,23 @@
 [Unit]
 Description=Google Business Bot
 After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
-User=YOUR_USERNAME
-WorkingDirectory=/path/to/bot
-ExecStart=/bin/bash -c 'source /path/to/bot/new_venv/bin/activate && source /path/to/bot/.env && python /path/to/bot/bot.py'
+User=root
+WorkingDirectory=/root/GoogleBusinessBot
+ExecStart=/bin/bash -c 'source /root/GoogleBusinessBot/new_venv/bin/activate && pip install -r /root/GoogleBusinessBot/requirements.txt && source /root/GoogleBusinessBot/.env && python /root/GoogleBusinessBot/bot.py'
 Restart=always
-RestartSec=10
-StandardOutput=append:/path/to/bot/logs/bot.log
-StandardError=append:/path/to/bot/logs/bot_error.log
+RestartSec=30
+TimeoutStartSec=180
+StandardOutput=append:/root/GoogleBusinessBot/logs/bot.log
+StandardError=append:/root/GoogleBusinessBot/logs/bot_error.log
+
+# Создаем необходимые директории
+ExecStartPre=/bin/mkdir -p /root/GoogleBusinessBot/logs
+ExecStartPre=/bin/mkdir -p /root/GoogleBusinessBot/logs/context_logs
 
 [Install]
 WantedBy=multi-user.target 

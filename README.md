@@ -2,26 +2,27 @@
 
 Телеграм-бот для бизнес-аккаунта с векторной базой данных документов из Google Drive.
 
-## Установка
+## Установка на VPS-сервер
 
-1. Клонируйте репозиторий:
+### Быстрая установка через Git
+
+1. Клонируйте репозиторий на сервер:
    ```
-   git clone [URL_репозитория]
+   git clone https://github.com/evseew/GoogleBusinessBot.git
    cd GoogleBusinessBot
    ```
 
-2. Создайте виртуальное окружение:
+2. Запустите скрипт установки:
    ```
-   python3 -m venv venv
-   source venv/bin/activate  # или venv\Scripts\activate на Windows
-   ```
-
-3. Установите зависимости:
-   ```
-   pip install -r requirements.txt
+   chmod +x server_setup.sh
+   ./server_setup.sh
    ```
 
-4. Настройте файл .env:
+3. Настройте файл .env:
+   ```
+   nano .env
+   ```
+   Добавьте следующие строки:
    ```
    TELEGRAM_BOT_TOKEN=ваш_токен_бота
    OPENAI_API_KEY=ваш_ключ_openai
@@ -29,13 +30,72 @@
    GOOGLE_DRIVE_FOLDER_ID=id_папки_гугл_драйв
    ```
 
-5. Поместите файл service-account-key.json в корневую директорию
+4. Добавьте файл `service-account-key.json` в корневую директорию
+
+5. Запустите бота как systemd-сервис:
+   ```
+   sudo systemctl start google-business-bot
+   sudo systemctl status google-business-bot
+   ```
+
+### Установка вручную
+
+1. Создайте директорию и скопируйте файлы:
+   ```
+   mkdir -p ~/GoogleBusinessBot/logs/context_logs
+   cd ~/GoogleBusinessBot
+   # Скопируйте все файлы из репозитория
+   ```
+
+2. Создайте виртуальное окружение:
+   ```
+   python3 -m venv new_venv
+   source new_venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+3. Настройте файл .env и добавьте service-account-key.json
+
+4. Настройте сервис и cron:
+   ```
+   sudo cp google-business-bot.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable google-business-bot
+   (crontab -l 2>/dev/null; cat crontab_entry.txt) | crontab -
+   ```
 
 ## Управление ботом
 
-- **Запуск бота**: `./start_bot.sh`
-- **Остановка бота**: `./stop_bot.sh`
+- **Запуск**: `sudo systemctl start google-business-bot` или `./start_bot.sh`
+- **Остановка**: `sudo systemctl stop google-business-bot` или `./stop_bot.sh`
+- **Статус**: `sudo systemctl status google-business-bot` или `./control.sh status`
+- **Перезапуск**: `sudo systemctl restart google-business-bot` или `./restart.sh`
 - **Обновление базы**: `./update_db.sh`
+- **Логи службы**: `journalctl -u google-business-bot -f`
+- **Логи бота**: `tail -f logs/bot.log`
+
+## Проверка работоспособности
+
+1. Отправьте команду `/start` боту в Telegram
+2. Проверьте логи на наличие ошибок: `tail -f logs/bot.log`
+3. Проверьте статус службы: `sudo systemctl status google-business-bot`
+
+## Устранение проблем
+
+- **Бот не запускается**:
+  - Проверьте логи: `journalctl -u google-business-bot -e`
+  - Убедитесь, что .env содержит правильные ключи API
+  - Проверьте права доступа: `chmod +x *.sh`
+
+- **Проблемы с базой данных**:
+  - Обновите базу вручную: `./update_db.sh`
+  - Проверьте логи обновления: `cat logs/db_update.log`
+
+- **Обновление из Git**:
+  ```
+  git pull
+  sudo systemctl restart google-business-bot
+  ```
 
 ## Команды бота
 

@@ -263,13 +263,13 @@ def download_text(service, file_id):
         logging.error(f"Error downloading text file: {str(e)}")
         return ""
 
-async def get_relevant_context(query: str, k: int = 3) -> str:
+async def get_relevant_context(query: str, k: int = 5) -> str:
     """Получает релевантный контекст из векторного хранилища."""
     try:
         # Устанавливаем правильную размерность, соответствующую существующей базе
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            dimensions=256  # Явно указываем размерность для соответствия базе
+            dimensions=1536  # Устанавливаем как в rebuild_db_fixed.py
         )
         
         logging.info(f"Подключаемся к векторному хранилищу для запроса: '{query}'")
@@ -289,21 +289,45 @@ async def get_relevant_context(query: str, k: int = 3) -> str:
         except Exception as inner_e:
             logging.error(f"Ошибка при проверке базы: {str(inner_e)}")
             
-        # Упростим параметры поиска, чтобы исключить проблемы
-        docs = vector_store.similarity_search(
+        # Поиск с фильтрацией метаданных для повышения точности
+        # Для начала пробуем точный поиск с высоким порогом релевантности
+        docs = vector_store.similarity_search_with_score(
             query, 
-            k=5  # Меньше результатов для начала
-            # Уберем score_threshold
+            k=7,  # Больше результатов для выбора наиболее релевантных
+            score_threshold=0.75  # Высокий порог релевантности
         )
         
+        # Если ничего не найдено, делаем поиск с более низким порогом
+        if not docs:
+            logging.info(f"Не найдено высокорелевантных документов, снижаем порог")
+            docs = vector_store.similarity_search_with_score(
+                query, 
+                k=5,
+                score_threshold=0.6
+            )
+            
+        # Сортируем результаты по релевантности
+        sorted_docs = sorted(docs, key=lambda x: x[1], reverse=True)
+        
         # Подробное логирование каждого найденного документа
-        logging.info(f"Найдено {len(docs)} документов для запроса '{query}'")
-        for i, doc in enumerate(docs):
+        logging.info(f"Найдено {len(sorted_docs)} документов для запроса '{query}'")
+        for i, (doc, score) in enumerate(sorted_docs):
             logging.info(f"Документ #{i+1}:")
             logging.info(f"Источник: {doc.metadata.get('source', 'неизвестно')}")
+            logging.info(f"Релевантность: {score:.4f}")
             logging.info(f"Содержание: {doc.page_content[:200]}...")
         
-        found_text = "\n".join([doc.page_content for doc in docs])
+        # Берем только наиболее релевантные документы для формирования контекста
+        top_docs = [doc for doc, score in sorted_docs[:5]]
+        
+        # Формируем контекст с указанием источников
+        context_pieces = []
+        for doc in top_docs:
+            source = doc.metadata.get('source', 'неизвестный источник')
+            context_pieces.append(f"Из документа '{source}':\n{doc.page_content}")
+            
+        found_text = "\n\n".join(context_pieces)
+        
         if not found_text:
             logging.warning(f"Не найдено релевантных документов для запроса: '{query}'")
         return found_text

@@ -15,7 +15,7 @@ load_dotenv()
 # Импортируем необходимые компоненты из bot.py
 from bot import read_data_from_drive
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 
@@ -32,19 +32,25 @@ async def rebuild_db_fixed():
         # Подготавливаем документы для индексации
         docs = []
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=3200,  # ~800 токенов
-            chunk_overlap=1600,  # ~400 токенов
+            chunk_size=1200,  # ~300 токенов - меньший размер для более точных ответов
+            chunk_overlap=400,  # ~100 токенов - 33% перекрытие для поддержания контекста
+            separators=["\n## ", "\n### ", "\n#### ", "\n", " ", ""],  # Разделение по структуре маркдаун
             length_function=len
         )
         
         print("Разбиваем документы на фрагменты...")
         for doc in documents_data:
-            splits = text_splitter.split_text(doc['content'])
+            # Добавляем имя файла в начало содержимого для лучшей идентификации
+            enhanced_content = f"Документ: {doc['name']}\n\n{doc['content']}"
+            splits = text_splitter.split_text(enhanced_content)
             for split in splits:
                 docs.append(
                     Document(
                         page_content=split,
-                        metadata={"source": doc['name']}
+                        metadata={
+                            "source": doc['name'],
+                            "document_type": "markdown" if doc['name'].endswith('.md') else "text"
+                        }
                     )
                 )
         print(f"Создано {len(docs)} фрагментов текста")
@@ -57,7 +63,7 @@ async def rebuild_db_fixed():
         print("Создаем новую векторную базу...")
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            dimensions=256  # Указываем размерность 256
+            dimensions=1536  # Увеличиваем размерность для лучшего качества
         )
         vectorstore = Chroma.from_documents(
             documents=docs,

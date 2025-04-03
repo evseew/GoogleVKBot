@@ -1,6 +1,29 @@
+# Виртуальное окружение
 new_venv/
-venv_310_fixed/
-__pycache__/
-*.pyc
-*.pid
+venv/
+env/
 .env
+
+# Кэши и компилированные файлы
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Логи и временные файлы
+logs/
+*.log
+*.pid
+.DS_Store
+
+# Локальная база данных векторов
+local_vector_db/
+
+# Редакторы и IDE
+.vscode/
+.idea/
+.cursor/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
