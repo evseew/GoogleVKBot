@@ -11,13 +11,17 @@ __pycache__/
 .pytest_cache/
 
 # Логи и временные файлы
-logs/
+logs/*
+!logs/.gitkeep
+logs/context_logs/*
+!logs/context_logs/.gitkeep
 *.log
 *.pid
 .DS_Store
 
 # Локальная база данных векторов
-local_vector_db/
+local_vector_db/*
+!local_vector_db/.gitkeep
 
 # Редакторы и IDE
 .vscode/
@@ -27,3 +31,8 @@ local_vector_db/
 # Системные файлы
 .DS_Store
 Thumbs.db
+
+# Секретные файлы и ключи
+service-account-key.json
+*.pem
+*.key
