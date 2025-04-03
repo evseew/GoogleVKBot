@@ -7,8 +7,8 @@ echo "Дата: $(date)"
 
 # 1. Создаем директории
 echo "Создание директорий..."
-mkdir -p ~/GoogleBusinessBot/logs
-mkdir -p ~/GoogleBusinessBot/logs/context_logs
+mkdir -p logs
+mkdir -p logs/context_logs
 
 # 2. Устанавливаем Python 3.10 (для Ubuntu/Debian)
 echo "Установка Python и необходимых пакетов..."
@@ -17,7 +17,6 @@ sudo apt install -y python3.10 python3.10-venv python3-pip git
 
 # 3. Создаем виртуальное окружение
 echo "Создание виртуального окружения..."
-cd ~/GoogleBusinessBot
 python3.10 -m venv new_venv
 source new_venv/bin/activate
 
