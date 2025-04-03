@@ -88,6 +88,10 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 user_processing_locks = {}
 user_message_queues = {}
 
+# Добавим словарь для отслеживания последних сообщений пользователей
+user_last_message_time = {}
+MESSAGE_COOLDOWN = 3  # минимальный интервал между сообщениями в секундах
+
 async def get_or_create_thread(user_id):
     """Получает или создает новый thread_id для пользователя."""
     if user_id in user_threads:
@@ -383,6 +387,25 @@ async def chat_with_assistant(user_id, message_text):
         
         # Формируем полный запрос с контекстом
         full_prompt = f"Контекст: {context}\n\nВопрос: {message_text}"
+        
+        # Проверяем, нет ли активного запроса для этого треда
+        try:
+            # Получаем список запусков для этого треда
+            runs = client.beta.threads.runs.list(thread_id=thread_id)
+            
+            # Проверяем, есть ли активные запуски
+            active_runs = [run for run in runs.data if run.status in ['queued', 'in_progress', 'requires_action']]
+            
+            if active_runs:
+                # Отменяем все активные запуски
+                for run in active_runs:
+                    try:
+                        client.beta.threads.runs.cancel(thread_id=thread_id, run_id=run.id)
+                        logging.info(f"Отменен активный запуск {run.id} для треда {thread_id}")
+                    except Exception as cancel_error:
+                        logging.warning(f"Не удалось отменить запуск {run.id}: {str(cancel_error)}")
+        except Exception as list_runs_error:
+            logging.warning(f"Ошибка при проверке активных запусков: {str(list_runs_error)}")
         
         # Добавляем сообщение пользователя в тред
         client.beta.threads.messages.create(
@@ -687,6 +710,21 @@ async def handle_business_message(message: types.Message):
     logging.info(f"Получено бизнес-сообщение от пользователя {user_id}: {user_input}")
     logging.info(f"Business connection ID: {message.business_connection_id}")
     
+    # Проверяем, не слишком ли часто пользователь отправляет сообщения
+    current_time = time.time()
+    if user_id in user_last_message_time:
+        time_since_last_message = current_time - user_last_message_time[user_id]
+        if time_since_last_message < MESSAGE_COOLDOWN:
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text="⚠️ Пожалуйста, подождите немного между сообщениями. Обрабатываю ваш предыдущий запрос...",
+                business_connection_id=message.business_connection_id
+            )
+            return
+    
+    # Обновляем время последнего сообщения
+    user_last_message_time[user_id] = current_time
+    
     # Очищаем старые сообщения перед обработкой нового
     await cleanup_old_messages()
     
@@ -712,6 +750,17 @@ async def handle_message(message: types.Message):
     user_input = message.text
 
     logging.info(f"Получено обычное сообщение от пользователя {user_id}: {user_input}")
+    
+    # Проверяем, не слишком ли часто пользователь отправляет сообщения
+    current_time = time.time()
+    if user_id in user_last_message_time:
+        time_since_last_message = current_time - user_last_message_time[user_id]
+        if time_since_last_message < MESSAGE_COOLDOWN:
+            await message.answer(f"⚠️ Пожалуйста, подождите немного между сообщениями. Обрабатываю ваш предыдущий запрос...")
+            return
+    
+    # Обновляем время последнего сообщения
+    user_last_message_time[user_id] = current_time
     
     # Очищаем старые сообщения перед обработкой нового
     await cleanup_old_messages()
