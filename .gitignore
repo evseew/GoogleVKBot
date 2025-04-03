@@ -36,3 +36,4 @@ Thumbs.db
 service-account-key.json
 *.pem
 *.key
+service-account-key.json
