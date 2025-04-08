@@ -37,6 +37,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFacePipeline
 from langchain_openai import OpenAIEmbeddings
+from langchain.text_splitter import MarkdownHeaderTextSplitter
 
 # Загружаем переменные из .env
 load_dotenv()
@@ -267,13 +268,13 @@ def download_text(service, file_id):
         logging.error(f"Error downloading text file: {str(e)}")
         return ""
 
-async def get_relevant_context(query: str, k: int = 5) -> str:
+async def get_relevant_context(query: str, k: int = 3) -> str:
     """Получает релевантный контекст из векторного хранилища."""
     try:
         # Устанавливаем правильную размерность, соответствующую существующей базе
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            dimensions=1536  # Устанавливаем как в rebuild_db_fixed.py
+            dimensions=1536  # Устанавливаем единую размерность для всех операций
         )
         
         logging.info(f"Подключаемся к векторному хранилищу для запроса: '{query}'")
@@ -311,8 +312,8 @@ async def get_relevant_context(query: str, k: int = 5) -> str:
             logging.info(f"Релевантность: {score:.4f}")
             logging.info(f"Содержание: {doc.page_content[:200]}...")
         
-        # Берем только 5 наиболее релевантных документов 
-        top_docs = [doc for doc, score in sorted_docs[:5]]
+        # Берем только 3 наиболее релевантных документа вместо 5
+        top_docs = [doc for doc, score in sorted_docs[:3]]
         
         # Формируем контекст с указанием источников
         context_pieces = []
@@ -458,24 +459,98 @@ async def update_vector_store():
         
         # Подготавливаем документы для индексации
         docs = []
+        
+        # Создаем сплиттер заголовков Markdown
+        markdown_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[
+                ("#", "header_1"),
+                ("##", "header_2"),
+                ("###", "header_3"),
+                ("####", "header_4"),
+            ]
+        )
+        
+        # Запасной вариант для не-Markdown документов
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=3200,  # ~800 токенов
-            chunk_overlap=1600,  # ~400 токенов
+            chunk_size=512,
+            chunk_overlap=100,
+            separators=["\n\n", "\n", ". ", " ", ""],
             length_function=len
         )
         
         for doc in documents_data:
-            splits = text_splitter.split_text(doc['content'])
-            for split in splits:
-                docs.append(
-                    Document(
-                        page_content=split,
-                        metadata={"source": doc['name']}
+            # Добавляем имя файла в начало содержимого для лучшей идентификации
+            enhanced_content = f"Документ: {doc['name']}\n\n{doc['content']}"
+            
+            # Определяем, является ли документ Markdown по расширению или содержимому
+            is_markdown = doc['name'].endswith('.md') or '##' in doc['content'] or '#' in doc['content']
+            
+            if is_markdown:
+                # Используем специальный сплиттер для Markdown
+                try:
+                    md_header_splits = markdown_splitter.split_text(enhanced_content)
+                    
+                    # Если документ слишком длинный, дополнительно делим каждый раздел
+                    if any(len(d.page_content) > 2000 for d in md_header_splits):
+                        final_docs = []
+                        for md_doc in md_header_splits:
+                            # Сохраняем метаданные заголовков
+                            headers_metadata = {k: v for k, v in md_doc.metadata.items() if k.startswith('header_')}
+                            
+                            # Делим большие разделы на более мелкие части
+                            smaller_chunks = text_splitter.split_text(md_doc.page_content)
+                            for chunk in smaller_chunks:
+                                final_docs.append(
+                                    Document(
+                                        page_content=chunk,
+                                        metadata={
+                                            "source": doc['name'],
+                                            "document_type": "markdown",
+                                            **headers_metadata  # Сохраняем структуру заголовков
+                                        }
+                                    )
+                                )
+                        docs.extend(final_docs)
+                    else:
+                        # Добавляем дополнительные метаданные и собираем документы
+                        for md_doc in md_header_splits:
+                            md_doc.metadata["source"] = doc['name']
+                            md_doc.metadata["document_type"] = "markdown"
+                        docs.extend(md_header_splits)
+                        
+                except Exception as e:
+                    logging.error(f"Ошибка при обработке Markdown документа {doc['name']}: {str(e)}")
+                    # В случае ошибки, используем обычный сплиттер как запасной вариант
+                    splits = text_splitter.split_text(enhanced_content)
+                    for split in splits:
+                        docs.append(
+                            Document(
+                                page_content=split,
+                                metadata={
+                                    "source": doc['name'],
+                                    "document_type": "text"
+                                }
+                            )
+                        )
+            else:
+                # Для обычных текстовых документов
+                splits = text_splitter.split_text(enhanced_content)
+                for split in splits:
+                    docs.append(
+                        Document(
+                            page_content=split,
+                            metadata={
+                                "source": doc['name'],
+                                "document_type": "text"
+                            }
+                        )
                     )
-                )
         
         # Создаем векторное хранилище
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-large",
+            dimensions=1536  # Устанавливаем единую размерность для всех операций
+        )
         vector_store = Chroma.from_documents(
             documents=docs,
             embedding=embeddings,
@@ -589,10 +664,10 @@ async def debug_database(message: types.Message):
         
         # Пробуем создать и проверить работу базы
         try:
-            # Добавляем параметр dimensions=256
+            # Используем единую размерность 1536
             embeddings = OpenAIEmbeddings(
                 model="text-embedding-3-large",
-                dimensions=256  # Добавляем этот параметр
+                dimensions=1536  # Единая размерность для всех операций
             )
             
             vector_store = Chroma(
