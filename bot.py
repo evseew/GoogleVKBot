@@ -457,11 +457,16 @@ async def update_vector_store():
     """Обновляет векторное хранилище документами из Google Drive"""
     try:
         # Получаем данные из Drive
+        logging.info("Начинаем обновление: получаем данные из Google Drive...")
         documents_data = read_data_from_drive()
-        
+        if not documents_data:
+            logging.warning("Не получено данных из Google Drive. Обновление прервано.")
+            return True
+        logging.info(f"Получено {len(documents_data)} документов из Google Drive.")
+
         # Подготавливаем документы для индексации
         docs = []
-        
+
         # Создаем сплиттер заголовков Markdown
         markdown_splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=[
@@ -471,7 +476,7 @@ async def update_vector_store():
                 ("####", "header_4"),
             ]
         )
-        
+
         # Запасной вариант для не-Markdown документов
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=512,
@@ -479,92 +484,121 @@ async def update_vector_store():
             separators=["\n\n", "\n", ". ", " ", ""],
             length_function=len
         )
-        
-        for doc in documents_data:
-            # Добавляем имя файла в начало содержимого для лучшей идентификации
-            enhanced_content = f"Документ: {doc['name']}\n\n{doc['content']}"
-            
-            # Определяем, является ли документ Markdown по расширению или содержимому
-            is_markdown = doc['name'].endswith('.md') or '##' in doc['content'] or '#' in doc['content']
-            
+
+        # --- НАЧАЛО ОБРАБОТКИ ДОКУМЕНТОВ ---
+        for doc_data in documents_data:
+            # Используем правильный синтаксис f-string
+            enhanced_content = f"Документ: {doc_data['name']}\n\n{doc_data['content']}"
+            is_markdown = doc_data['name'].endswith('.md') or '##' in doc_data['content'] or '#' in doc_data['content']
+
             if is_markdown:
-                # Используем специальный сплиттер для Markdown
                 try:
                     md_header_splits = markdown_splitter.split_text(enhanced_content)
-                    
-                    # Если документ слишком длинный, дополнительно делим каждый раздел
                     if any(len(d.page_content) > 2000 for d in md_header_splits):
-                        final_docs = []
+                        final_docs_part = []
                         for md_doc in md_header_splits:
-                            # Сохраняем метаданные заголовков
                             headers_metadata = {k: v for k, v in md_doc.metadata.items() if k.startswith('header_')}
-                            
-                            # Делим большие разделы на более мелкие части
                             smaller_chunks = text_splitter.split_text(md_doc.page_content)
                             for chunk in smaller_chunks:
-                                final_docs.append(
+                                final_docs_part.append(
                                     Document(
                                         page_content=chunk,
                                         metadata={
-                                            "source": doc['name'],
+                                            "source": doc_data['name'],
                                             "document_type": "markdown",
-                                            **headers_metadata  # Сохраняем структуру заголовков
+                                            **headers_metadata
                                         }
                                     )
                                 )
-                        docs.extend(final_docs)
+                        docs.extend(final_docs_part)
                     else:
-                        # Добавляем дополнительные метаданные и собираем документы
                         for md_doc in md_header_splits:
-                            md_doc.metadata["source"] = doc['name']
+                            md_doc.metadata["source"] = doc_data['name']
                             md_doc.metadata["document_type"] = "markdown"
                         docs.extend(md_header_splits)
-                        
                 except Exception as e:
-                    logging.error(f"Ошибка при обработке Markdown документа {doc['name']}: {str(e)}")
-                    # В случае ошибки, используем обычный сплиттер как запасной вариант
+                    logging.error(f"Ошибка при обработке Markdown документа {doc_data['name']}: {str(e)}")
                     splits = text_splitter.split_text(enhanced_content)
                     for split in splits:
                         docs.append(
                             Document(
                                 page_content=split,
                                 metadata={
-                                    "source": doc['name'],
+                                    "source": doc_data['name'],
                                     "document_type": "text"
                                 }
                             )
                         )
             else:
-                # Для обычных текстовых документов
                 splits = text_splitter.split_text(enhanced_content)
                 for split in splits:
                     docs.append(
                         Document(
                             page_content=split,
                             metadata={
-                                "source": doc['name'],
+                                "source": doc_data['name'],
                                 "document_type": "text"
                             }
                         )
                     )
-        
-        # Создаем векторное хранилище
+        # --- КОНЕЦ ОБРАБОТКИ ДОКУМЕНТОВ ---
+
+        if not docs:
+            logging.warning("После обработки документов не осталось чанков для добавления в базу.")
+            return True
+
+        logging.info(f"Подготовлено {len(docs)} чанков для добавления в базу.")
+
+        # --- НАЧАЛО УДАЛЕНИЯ СТАРОЙ КОЛЛЕКЦИИ ---
+        persist_directory = "./local_vector_db"
+        collection_name = "documents"
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            dimensions=1536  # Устанавливаем единую размерность для всех операций
+            dimensions=1536
         )
+
+        try:
+            if os.path.exists(persist_directory):
+                logging.info(f"Попытка удаления старой коллекции '{collection_name}' из '{persist_directory}'...")
+                client = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+                try:
+                    client.get_collection(name=collection_name) # Проверяем наличие
+                    client.delete_collection(name=collection_name) # Удаляем, если нашлась
+                    logging.info(f"Старая коллекция '{collection_name}' успешно удалена.")
+                except Exception as get_coll_exc:
+                     logging.info(f"Коллекция '{collection_name}' не найдена для удаления (или ошибка: {str(get_coll_exc)}). Пропускаем удаление.")
+            else:
+                logging.info(f"Директория '{persist_directory}' не существует. Удаление коллекции не требуется.")
+        except Exception as e:
+            logging.warning(f"Не удалось корректно обработать удаление коллекции '{collection_name}' (ошибка: {str(e)}). Попытка продолжить обновление...")
+        # --- КОНЕЦ УДАЛЕНИЯ СТАРОЙ КОЛЛЕКЦИИ ---
+
+        logging.info(f"Создаем новую коллекцию '{collection_name}' с {len(docs)} чанками...")
         vector_store = Chroma.from_documents(
             documents=docs,
             embedding=embeddings,
-            persist_directory="./local_vector_db"
+            collection_name=collection_name,
+            persist_directory=persist_directory
         )
+        logging.info("Новая коллекция создана. Сохраняем изменения...")
         vector_store.persist()
-        
-        logging.info(f"Vector store updated with {len(docs)} chunks from {len(documents_data)} documents")
+        logging.info("Изменения успешно сохранены в базу данных.")
+
+        try:
+            db_file_path = os.path.join(persist_directory, 'chroma.sqlite3')
+            if os.path.exists(db_file_path):
+                 mod_time = os.path.getmtime(db_file_path)
+                 logging.info(f"Время модификации файла базы данных ({db_file_path}) после обновления: {datetime.fromtimestamp(mod_time)}")
+            else:
+                 logging.warning(f"Файл базы данных {db_file_path} не найден после persist.")
+        except Exception as time_err:
+            logging.warning(f"Не удалось проверить время модификации базы: {str(time_err)}")
+
+        logging.info("Обновление векторного хранилища успешно завершено.")
         return True
-        
+
     except Exception as e:
-        logging.error(f"Error updating vector store: {str(e)}")
+        logging.error(f"Критическая ошибка при обновлении векторного хранилища: {str(e)}", exc_info=True)
         return False
 
 @router.message(Command("start"))
