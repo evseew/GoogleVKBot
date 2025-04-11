@@ -164,15 +164,17 @@ def read_data_from_drive():
     """Читает данные из Google Drive"""
     global drive_cache  # Добавьте эту строку
     
-    # Проверяем, есть ли кэш и не устарел ли он
-    cache_time = os.path.getmtime("vector_store") if os.path.exists("vector_store") else 0
-    current_time = time.time()
+    # # Проверяем, есть ли кэш и не устарел ли он
+    # cache_time = os.path.getmtime("vector_store") if os.path.exists("vector_store") else 0
+    # current_time = time.time()
     
-    # Если кэш свежий (менее 1 часа), используем его
-    if current_time - cache_time < 3600 and drive_cache:
-        return drive_cache
+    # # Если кэш свежий (менее 1 часа), используем его
+    # if current_time - cache_time < 3600 and drive_cache:
+    #     logging.info("Используем кэшированные данные из Google Drive") # Добавим лог
+    #     return drive_cache
     
-    # Иначе загружаем данные заново
+    # # Иначе загружаем данные заново
+    # logging.info("Кэш устарел или отсутствует. Загружаем данные из Google Drive...") # Добавим лог
     service = get_drive_service()
     result = []
     
@@ -216,8 +218,8 @@ def read_data_from_drive():
     except Exception as e:
         logging.error(f"Error reading from Google Drive: {str(e)}")
     
-    # Сохраняем в кэш
-    drive_cache = result
+    # # Сохраняем в кэш
+    # drive_cache = result
     return result
 
 def download_google_doc(service, file_id):
