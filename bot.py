@@ -9,6 +9,7 @@ from collections import deque
 import datetime
 import subprocess
 import signal
+import shutil
 
 # Отладочная информация
 print(f"Python: {sys.version}")
@@ -461,43 +462,29 @@ async def update_vector_store():
         documents_data = read_data_from_drive()
         if not documents_data:
             logging.warning("Не получено данных из Google Drive. Обновление прервано.")
-            # Возвращаем True, т.к. технически ошибки не было, но и обновления тоже
             return True
         logging.info(f"Получено {len(documents_data)} документов из Google Drive.")
 
         # Подготавливаем документы для индексации
         docs = []
-
-        # --- НАЧАЛО ОБРАБОТКИ ДОКУМЕНТОВ ---
         markdown_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=[
-                ("#", "header_1"),
-                ("##", "header_2"),
-                ("###", "header_3"),
-                ("####", "header_4"),
-            ]
+            headers_to_split_on=[("#", "header_1"),("##", "header_2"),("###", "header_3"),("####", "header_4"),]
         )
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1024,
-            chunk_overlap=200,
-            # Используем экранированные символы новой строки для корректной работы
+            chunk_size=1024, # Оставляем увеличенные значения
+            chunk_overlap=200, # Оставляем увеличенные значения
             separators=["\n\n", "\n", ". ", " ", ""],
             length_function=len
         )
-
         for doc_data in documents_data:
-            # Убедимся, что content является строкой
             content_str = doc_data.get('content', '')
             if not isinstance(content_str, str):
                 logging.warning(f"Содержимое документа {doc_data.get('name', 'N/A')} не является строкой, пропускаем.")
                 continue
-
-            # Правильный f-string
             enhanced_content = f"Документ: {doc_data.get('name', 'N/A')}\n\n{content_str}"
             doc_name = doc_data.get('name', 'unknown')
             is_markdown = doc_name.endswith('.md') or '##' in content_str or '#' in content_str
-
-            try: # Добавляем общий try-except для обработки одного документа
+            try:
                 if is_markdown:
                     try:
                         md_header_splits = markdown_splitter.split_text(enhanced_content)
@@ -507,16 +494,7 @@ async def update_vector_store():
                                 headers_metadata = {k: v for k, v in md_doc.metadata.items() if k.startswith('header_')}
                                 smaller_chunks = text_splitter.split_text(md_doc.page_content)
                                 for chunk in smaller_chunks:
-                                    final_docs_part.append(
-                                        Document(
-                                            page_content=chunk,
-                                            metadata={
-                                                "source": doc_name,
-                                                "document_type": "markdown",
-                                                **headers_metadata
-                                            }
-                                        )
-                                    )
+                                    final_docs_part.append(Document(page_content=chunk, metadata={"source": doc_name, "document_type": "markdown", **headers_metadata}))
                             docs.extend(final_docs_part)
                         else:
                             for md_doc in md_header_splits:
@@ -525,67 +503,64 @@ async def update_vector_store():
                             docs.extend(md_header_splits)
                     except Exception as e_md:
                         logging.error(f"Ошибка при обработке Markdown документа {doc_name}: {str(e_md)}. Пробуем как обычный текст.")
-                        # Если ошибка в Markdown, пробуем как текст
                         splits = text_splitter.split_text(enhanced_content)
                         for split in splits:
                              docs.append(Document(page_content=split, metadata={"source": doc_name, "document_type": "text_fallback"}))
                 else:
                     splits = text_splitter.split_text(enhanced_content)
                     for split in splits:
-                        docs.append(
-                            Document(
-                                page_content=split,
-                                metadata={
-                                    "source": doc_name,
-                                    "document_type": "text"
-                                }
-                            )
-                        )
+                        docs.append(Document(page_content=split, metadata={"source": doc_name, "document_type": "text"}))
             except Exception as e_doc:
                  logging.error(f"Не удалось обработать документ {doc_name}: {str(e_doc)}")
-                 continue # Переходим к следующему документу
+                 continue
         # --- КОНЕЦ ОБРАБОТКИ ДОКУМЕНТОВ ---
 
         if not docs:
             logging.warning("После обработки документов не осталось чанков для добавления в базу.")
-            return True # Технически не ошибка, но база не обновилась
+            return True
 
         logging.info(f"Подготовлено {len(docs)} чанков для добавления в базу.")
 
-        # --- НАЧАЛО УДАЛЕНИЯ СТАРОЙ КОЛЛЕКЦИИ ---
+        # --- НАЧАЛО УДАЛЕНИЯ СТАРОЙ ПАПКИ БАЗЫ ДАННЫХ ---
         persist_directory = "./local_vector_db"
-        collection_name = "documents"
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large", dimensions=1536)
-
         try:
-            if os.path.exists(persist_directory):
-                logging.info(f"Попытка удаления коллекции '{collection_name}' (если существует) из '{persist_directory}'...")
-                client = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
-                # Просто пытаемся удалить. Если коллекции нет, Chroma может выдать ошибку или ничего не сделать.
-                client.delete_collection(name=collection_name)
-                logging.info(f"Запрос на удаление коллекции '{collection_name}' выполнен (или коллекции не было).")
-                del client # Освобождаем ресурс
+            if os.path.exists(persist_directory) and os.path.isdir(persist_directory):
+                logging.info(f"Удаляем существующую папку базы данных: '{persist_directory}'...")
+                shutil.rmtree(persist_directory)
+                # Проверяем, что папка действительно удалена
+                if not os.path.exists(persist_directory):
+                     logging.info(f"Папка '{persist_directory}' успешно удалена.")
+                else:
+                     logging.warning(f"Папка '{persist_directory}' НЕ была удалена после rmtree!")
+                     # Можно добавить return False здесь, если это критично
+            elif not os.path.exists(persist_directory):
+                 logging.info(f"Папка '{persist_directory}' не существует. Удаление не требуется.")
             else:
-                logging.info(f"Директория '{persist_directory}' не существует. Удаление коллекции не требуется.")
+                 # Путь существует, но это не папка - проблема!
+                 logging.error(f"Путь '{persist_directory}' существует, но не является папкой! Невозможно удалить.")
+                 return False # Прерываем обновление
         except Exception as e:
-            # Логируем ошибку, если удаление не удалось, но продолжаем
-            logging.warning(f"Возникла ошибка при попытке удаления коллекции '{collection_name}': {str(e)}. Возможно, коллекции не было. Продолжаем...")
-        # --- КОНЕЦ УДАЛЕНИЯ СТАРОЙ КОЛЛЕКЦИИ ---
+            logging.error(f"Ошибка при удалении папки '{persist_directory}': {str(e)}", exc_info=True)
+            return False # Прерываем обновление, так как не можем гарантировать чистое состояние
+        # --- КОНЕЦ УДАЛЕНИЯ СТАРОЙ ПАПКИ ---
 
-        # Пауза после потенциального удаления
+        # Пауза после удаления
         time.sleep(1)
 
-        logging.info(f"Создаем новую коллекцию '{collection_name}' с {len(docs)} чанками...")
+        # Создаем новую базу с нуля
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-large", dimensions=1536)
+        logging.info(f"Создаем новую базу данных в '{persist_directory}' с {len(docs)} чанками...")
         vector_store = Chroma.from_documents(
             documents=docs,
             embedding=embeddings,
-            collection_name=collection_name,
+            # collection_name теперь не так важен, но оставим для ясности
+            collection_name="documents",
             persist_directory=persist_directory
         )
-        logging.info("Новая коллекция создана. Сохраняем изменения...")
+        logging.info("Новая база данных создана. Сохраняем изменения...")
         vector_store.persist()
         vector_store = None # Очищаем объект
-        logging.info("Изменения успешно сохранены в базу данных.")
+        logging.info("Изменения успешно сохранены.")
 
         # Проверка времени модификации
         try:
