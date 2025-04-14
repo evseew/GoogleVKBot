@@ -478,8 +478,8 @@ async def update_vector_store():
             ]
         )
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=512,
-            chunk_overlap=100,
+            chunk_size=1024,
+            chunk_overlap=200,
             # Используем экранированные символы новой строки для корректной работы
             separators=["\n\n", "\n", ". ", " ", ""],
             length_function=len
