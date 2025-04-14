@@ -1104,9 +1104,38 @@ async def periodic_cleanup():
             logging.error(f"Ошибка в периодической очистке: {str(e)}")
             await asyncio.sleep(60)  # Подождем минуту перед следующей попыткой
 
+def save_vector_db_creation_time():
+    """Сохраняет текущее время как время создания/обновления векторной базы данных"""
+    try:
+        # Путь к файлу, где будем хранить время
+        timestamp_file = os.path.join("./local_vector_db", "last_update.txt")
+        
+        # Записываем текущее время
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(timestamp_file, "w") as f:
+            f.write(current_time)
+        
+        logging.info(f"Сохранено время обновления базы данных: {current_time}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении времени обновления базы: {str(e)}")
+        return False
+
 def get_vector_db_creation_time():
     """Получает время создания/обновления векторной базы данных"""
     try:
+        # Сначала проверяем файл с сохраненным временем
+        timestamp_file = os.path.join("./local_vector_db", "last_update.txt")
+        if os.path.exists(timestamp_file):
+            try:
+                with open(timestamp_file, "r") as f:
+                    time_str = f.read().strip()
+                    return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            except Exception as file_err:
+                logging.warning(f"Ошибка при чтении файла времени обновления: {str(file_err)}")
+                # Продолжаем с методом получения времени из модификации файлов
+        
         # Проверяем оба возможных пути
         possible_paths = [
             "./local_vector_db",
