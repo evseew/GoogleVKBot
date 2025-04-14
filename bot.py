@@ -605,11 +605,11 @@ async def update_vector_store():
             logging.info(f"Создаем клиент ChromaDB с хранилищем в '{persist_directory}'...")
             chroma_client = chromadb.PersistentClient(path=persist_directory)
             
-            # Создаем коллекцию
-            logging.info(f"Создаем новую коллекцию 'documents'...")
-            collection = chroma_client.create_collection(name="documents")
+            # Получаем или создаем коллекцию (вместо просто create_collection)
+            logging.info(f"Получаем или создаем коллекцию 'documents'...")
+            collection = chroma_client.get_or_create_collection(name="documents")
             
-            # Проверка создания коллекции
+            # Проверка получения/создания коллекции
             if collection:
                 logging.info(f"Коллекция 'documents' успешно создана.")
             else:
