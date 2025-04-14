@@ -274,61 +274,103 @@ def download_text(service, file_id):
 async def get_relevant_context(query: str, k: int = 3) -> str:
     """Получает релевантный контекст из векторного хранилища."""
     try:
-        # Устанавливаем правильную размерность, соответствующую существующей базе
-        embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-large",
-            dimensions=1536  # Устанавливаем единую размерность для всех операций
-        )
+        persist_directory = "./local_vector_db"
+        collection_name = "documents"
         
-        logging.info(f"Подключаемся к векторному хранилищу для запроса: '{query}'")
-        vector_store = Chroma(
-            collection_name="documents",
-            embedding_function=embeddings,
-            persist_directory="./local_vector_db"
-        )
-
-        # Проверяем, есть ли вообще данные в базе
+        # Проверяем существование базы данных
+        if not os.path.exists(persist_directory):
+            logging.error(f"База данных не найдена по пути '{persist_directory}'")
+            return "ВНИМАНИЕ: База данных не найдена. Пожалуйста, обновите базу знаний с помощью команды /update."
+        
         try:
-            collection = vector_store.get()
-            if not collection or len(collection['ids']) == 0:
-                logging.error("База векторов пуста! Вызовите /update или /check_db")
-                return "ВНИМАНИЕ: База данных пуста. Пожалуйста, обновите базу знаний с помощью команды /update."
-            logging.info(f"В базе найдено {len(collection['ids'])} записей")
-        except Exception as inner_e:
-            logging.error(f"Ошибка при проверке базы: {str(inner_e)}")
+            import chromadb
+            from openai import OpenAI
+
+            # Подключаемся к ChromaDB напрямую
+            logging.info(f"Подключаемся к базе данных для запроса: '{query}'")
+            chroma_client = chromadb.PersistentClient(path=persist_directory)
             
-        # Используем базовый поиск без порога релевантности
-        # Запрашиваем больше документов, чтобы отфильтровать самые релевантные
-        docs = vector_store.similarity_search_with_score(
-            query, 
-            k=10  # Больше результатов для последующей фильтрации
-        )
+            # Получаем коллекцию
+            try:
+                collection = chroma_client.get_collection(name=collection_name)
+                
+                # Проверяем, есть ли документы в коллекции
+                count = collection.count()
+                if count == 0:
+                    logging.error("База векторов пуста! Вызовите /update")
+                    return "ВНИМАНИЕ: База данных пуста. Пожалуйста, обновите базу знаний с помощью команды /update."
+                
+                logging.info(f"В базе найдено {count} записей")
+                
+            except Exception as coll_e:
+                logging.error(f"Не удалось получить коллекцию: {str(coll_e)}")
+                return f"ОШИБКА: Не удалось подключиться к базе данных: {str(coll_e)}"
             
-        # Сортируем результаты по релевантности (по убыванию схожести)
-        sorted_docs = sorted(docs, key=lambda x: x[1])
-        
-        # Подробное логирование каждого найденного документа
-        logging.info(f"Найдено {len(sorted_docs)} документов для запроса '{query}'")
-        for i, (doc, score) in enumerate(sorted_docs):
-            logging.info(f"Документ #{i+1}:")
-            logging.info(f"Источник: {doc.metadata.get('source', 'неизвестно')}")
-            logging.info(f"Релевантность: {score:.4f}")
-            logging.info(f"Содержание: {doc.page_content[:200]}...")
-        
-        # Берем только 3 наиболее релевантных документа вместо 5
-        top_docs = [doc for doc, score in sorted_docs[:3]]
-        
-        # Формируем контекст с указанием источников
-        context_pieces = []
-        for doc in top_docs:
-            source = doc.metadata.get('source', 'неизвестный источник')
-            context_pieces.append(f"Из документа '{source}':\n{doc.page_content}")
+            # Создаем embedding для запроса
+            client = OpenAI()  # По умолчанию использует OPENAI_API_KEY из переменных окружения
+            model_name = "text-embedding-3-large"
+            embed_dim = 1536
             
-        found_text = "\n\n".join(context_pieces)
-        
-        if not found_text:
-            logging.warning(f"Не найдено релевантных документов для запроса: '{query}'")
-        return found_text
+            # Получаем вектор запроса
+            logging.info(f"Получаем вектор для запроса: '{query}'")
+            query_embedding_response = client.embeddings.create(
+                input=[query],
+                model=model_name,
+                dimensions=embed_dim
+            )
+            query_embedding = query_embedding_response.data[0].embedding
+            
+            # Выполняем поиск в коллекции
+            logging.info(f"Выполняем поиск по запросу: '{query}'")
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=10,  # Запрашиваем больше результатов для фильтрации
+                include=["documents", "metadatas", "distances"]
+            )
+            
+            # Проверяем результаты
+            if not results["ids"] or not results["ids"][0] or len(results["ids"][0]) == 0:
+                logging.warning(f"Не найдено релевантных документов для запроса: '{query}'")
+                return ""
+            
+            # Формируем результаты в читаемом формате
+            documents = results["documents"][0]
+            metadatas = results["metadatas"][0]
+            distances = results["distances"][0]
+            
+            # Создаем список кортежей (документ, метаданные, расстояние)
+            doc_tuples = list(zip(documents, metadatas, distances))
+            
+            # Сортируем результаты по релевантности (по возрастанию расстояния)
+            sorted_docs = sorted(doc_tuples, key=lambda x: x[2])
+            
+            # Подробное логирование каждого найденного документа
+            logging.info(f"Найдено {len(sorted_docs)} документов для запроса '{query}'")
+            for i, (doc_text, metadata, distance) in enumerate(sorted_docs):
+                logging.info(f"Документ #{i+1}:")
+                logging.info(f"Источник: {metadata.get('source', 'неизвестно')}")
+                logging.info(f"Релевантность (расстояние): {distance:.4f}")
+                logging.info(f"Содержание: {doc_text[:200]}...")
+            
+            # Берем только k наиболее релевантных документов
+            top_docs = sorted_docs[:k]
+            
+            # Формируем контекст с указанием источников
+            context_pieces = []
+            for doc_text, metadata, distance in top_docs:
+                source = metadata.get('source', 'неизвестный источник')
+                context_pieces.append(f"Из документа '{source}':\n{doc_text}")
+                
+            found_text = "\n\n".join(context_pieces)
+            
+            if not found_text:
+                logging.warning(f"Не найдено релевантных документов для запроса: '{query}'")
+            return found_text
+            
+        except ImportError as ie:
+            logging.error(f"Не установлена необходимая библиотека: {str(ie)}")
+            return f"ОШИБКА: Не установлены библиотеки для работы с базой данных: {str(ie)}"
+            
     except Exception as e:
         logging.error(f"Ошибка при получении контекста: {str(e)}")
         # Возвращаем информацию об ошибке в контексте
@@ -471,8 +513,8 @@ async def update_vector_store():
             headers_to_split_on=[("#", "header_1"),("##", "header_2"),("###", "header_3"),("####", "header_4"),]
         )
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1024, # Оставляем увеличенные значения
-            chunk_overlap=200, # Оставляем увеличенные значения
+            chunk_size=1024, # Используем увеличенные значения
+            chunk_overlap=200, # Используем увеличенные значения
             separators=["\n\n", "\n", ". ", " ", ""],
             length_function=len
         )
@@ -532,7 +574,7 @@ async def update_vector_store():
                      logging.info(f"Папка '{persist_directory}' успешно удалена.")
                 else:
                      logging.warning(f"Папка '{persist_directory}' НЕ была удалена после rmtree!")
-                     # Можно добавить return False здесь, если это критично
+                     return False  # Прерываем, если не удалось удалить
             elif not os.path.exists(persist_directory):
                  logging.info(f"Папка '{persist_directory}' не существует. Удаление не требуется.")
             else:
@@ -541,40 +583,102 @@ async def update_vector_store():
                  return False # Прерываем обновление
         except Exception as e:
             logging.error(f"Ошибка при удалении папки '{persist_directory}': {str(e)}", exc_info=True)
-            return False # Прерываем обновление, так как не можем гарантировать чистое состояние
+            return False # Прерываем обновление
         # --- КОНЕЦ УДАЛЕНИЯ СТАРОЙ ПАПКИ ---
 
         # Пауза после удаления
         time.sleep(1)
 
-        # Создаем новую базу с нуля
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large", dimensions=1536)
-        logging.info(f"Создаем новую базу данных в '{persist_directory}' с {len(docs)} чанками...")
-        vector_store = Chroma.from_documents(
-            documents=docs,
-            embedding=embeddings,
-            # collection_name теперь не так важен, но оставим для ясности
-            collection_name="documents",
-            persist_directory=persist_directory
-        )
-        logging.info("Новая база данных создана. Сохраняем изменения...")
-        vector_store.persist()
-        vector_store = None # Очищаем объект
-        logging.info("Изменения успешно сохранены.")
-
-        # Проверка времени модификации
+        # --- СОЗДАНИЕ БАЗЫ ДАННЫХ НАПРЯМУЮ ЧЕРЕЗ CHROMADB ---
+        # Мы больше не используем langchain_community.vectorstores.Chroma, а работаем с chromadb напрямую
         try:
-            db_file_path = os.path.join(persist_directory, 'chroma.sqlite3')
-            if os.path.exists(db_file_path):
-                 mod_time = os.path.getmtime(db_file_path)
-                 logging.info(f"Время модификации файла базы ({db_file_path}) после обновления: {datetime.fromtimestamp(mod_time)}")
-            else:
-                 logging.warning(f"Файл базы {db_file_path} не найден после persist.")
-        except Exception as time_err:
-            logging.warning(f"Не удалось проверить время модификации базы: {str(time_err)}")
+            import chromadb
+            from chromadb.config import Settings
+            from openai import OpenAI
 
-        logging.info("Обновление векторного хранилища успешно завершено.")
-        return True
+            # Используем ту же модель OpenAI, что и раньше
+            client = OpenAI()  # По умолчанию использует OPENAI_API_KEY из переменных окружения
+            model_name = "text-embedding-3-large"
+            embed_dim = 1536
+            
+            # Создаем клиент ChromaDB напрямую
+            logging.info(f"Создаем клиент ChromaDB с хранилищем в '{persist_directory}'...")
+            chroma_client = chromadb.PersistentClient(path=persist_directory)
+            
+            # Создаем коллекцию
+            logging.info(f"Создаем новую коллекцию 'documents'...")
+            collection = chroma_client.create_collection(name="documents")
+            
+            # Проверка создания коллекции
+            if collection:
+                logging.info(f"Коллекция 'documents' успешно создана.")
+            else:
+                logging.error("Не удалось создать коллекцию 'documents'!")
+                return False
+                
+            # Подготавливаем данные для добавления
+            # ChromaDB требует словари {id, document, metadata, embedding}
+            # Мы будем добавлять документы порциями, чтобы не перегружать память
+            logging.info(f"Готовимся добавить {len(docs)} документов...")
+            
+            # Преобразуем документы LangChain в формат для ChromaDB
+            batch_size = 50
+            total_added = 0
+            
+            for i in range(0, len(docs), batch_size):
+                batch = docs[i:i+batch_size]
+                chunk_ids = []
+                chunk_texts = []
+                chunk_metadatas = []
+                
+                for j, doc in enumerate(batch):
+                    doc_id = f"doc_{i+j}"
+                    chunk_ids.append(doc_id)
+                    chunk_texts.append(doc.page_content)
+                    chunk_metadatas.append(doc.metadata)
+                
+                # Получаем встраивания от OpenAI для текущей партии
+                logging.info(f"Получаем встраивания для партии {i//batch_size + 1}/{(len(docs)-1)//batch_size + 1} ({len(chunk_texts)} документов)...")
+                try:
+                    embeddings_response = client.embeddings.create(
+                        input=chunk_texts,
+                        model=model_name,
+                        dimensions=embed_dim
+                    )
+                    chunk_embeddings = [e.embedding for e in embeddings_response.data]
+                    
+                    # Добавляем документы с встраиваниями в коллекцию
+                    collection.add(
+                        ids=chunk_ids,
+                        documents=chunk_texts,
+                        metadatas=chunk_metadatas,
+                        embeddings=chunk_embeddings
+                    )
+                    
+                    total_added += len(chunk_texts)
+                    logging.info(f"Добавлено {total_added}/{len(docs)} документов.")
+                    
+                except Exception as e:
+                    logging.error(f"Ошибка при обработке партии документов {i//batch_size + 1}: {str(e)}", exc_info=True)
+                    # Продолжаем со следующей партией
+            
+            # Проверяем, все ли документы были добавлены
+            count = collection.count()
+            logging.info(f"Всего в коллекции '{count}' документов.")
+            
+            if count == 0:
+                logging.error("После завершения добавления в коллекции нет документов!")
+                return False
+                
+            logging.info("Обновление векторного хранилища успешно завершено.")
+            return True
+            
+        except ImportError as ie:
+            logging.error(f"Не установлена необходимая библиотека: {str(ie)}")
+            return False
+        except Exception as e:
+            logging.error(f"Критическая ошибка при создании векторного хранилища: {str(e)}", exc_info=True)
+            return False
 
     except Exception as e:
         logging.error(f"Критическая ошибка при обновлении векторного хранилища: {str(e)}", exc_info=True)
