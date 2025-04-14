@@ -590,47 +590,32 @@ async def update_vector_store():
         time.sleep(1)
 
         # --- СОЗДАНИЕ БАЗЫ ДАННЫХ НАПРЯМУЮ ЧЕРЕЗ CHROMADB ---
-        # Мы больше не используем langchain_community.vectorstores.Chroma, а работаем с chromadb напрямую
         try:
             import chromadb
             from chromadb.config import Settings
             from openai import OpenAI
 
-            # Используем ту же модель OpenAI, что и раньше
-            client = OpenAI()  # По умолчанию использует OPENAI_API_KEY из переменных окружения
+            client = OpenAI() 
             model_name = "text-embedding-3-large"
             embed_dim = 1536
             
-            # Создаем клиент ChromaDB напрямую
-            logging.info(f"Создаем клиент ChromaDB с хранилищем в '{persist_directory}'...")
-            chroma_client = chromadb.PersistentClient(path=persist_directory)
+            # Создаем директорию если не существует
+            os.makedirs(persist_directory, exist_ok=True)
+            logging.info(f"Создана директория для векторного хранилища: {persist_directory}")
             
-            # Получаем или создаем коллекцию (вместо просто create_collection)
-            logging.info(f"Получаем или создаем коллекцию 'documents'...")
-            collection = chroma_client.get_or_create_collection(name="documents")
-            
-            # Проверка получения/создания коллекции
-            if collection:
-                logging.info(f"Коллекция 'documents' успешно создана.")
-            else:
-                logging.error("Не удалось создать коллекцию 'documents'!")
-                return False
-                
             # Подготавливаем данные для добавления
-            # ChromaDB требует словари {id, document, metadata, embedding}
-            # Мы будем добавлять документы порциями, чтобы не перегружать память
-            logging.info(f"Готовимся добавить {len(docs)} документов...")
-            
-            # Преобразуем документы LangChain в формат для ChromaDB
-            batch_size = 50
+            collection_name = "documents"
+            batch_size = 40  # Меньший размер партии для лучшей стабильности
             total_added = 0
             
+            # Обрабатываем документы партиями
             for i in range(0, len(docs), batch_size):
                 batch = docs[i:i+batch_size]
                 chunk_ids = []
                 chunk_texts = []
                 chunk_metadatas = []
                 
+                # Подготовка данных для текущей партии
                 for j, doc in enumerate(batch):
                     doc_id = f"doc_{i+j}"
                     chunk_ids.append(doc_id)
@@ -647,7 +632,14 @@ async def update_vector_store():
                     )
                     chunk_embeddings = [e.embedding for e in embeddings_response.data]
                     
-                    # Добавляем документы с встраиваниями в коллекцию
+                    # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Создаем новый клиент ChromaDB для каждой партии ---
+                    logging.info(f"Создаем новый клиент ChromaDB для партии {i//batch_size + 1}...")
+                    chroma_client = chromadb.PersistentClient(path=persist_directory, settings=Settings(anonymized_telemetry=False))
+                    
+                    # Получаем или создаем коллекцию
+                    collection = chroma_client.get_or_create_collection(name=collection_name)
+                    
+                    # Добавляем текущую партию
                     collection.add(
                         ids=chunk_ids,
                         documents=chunk_texts,
@@ -655,23 +647,32 @@ async def update_vector_store():
                         embeddings=chunk_embeddings
                     )
                     
+                    # Явно освобождаем ресурсы после каждой партии
+                    del collection
+                    del chroma_client
+                    # Принудительный сбор мусора
+                    import gc
+                    gc.collect()
+                    # Пауза для завершения всех фоновых операций
+                    time.sleep(1)
+                    
                     total_added += len(chunk_texts)
                     logging.info(f"Добавлено {total_added}/{len(docs)} документов.")
                     
                 except Exception as e:
-                    logging.error(f"Ошибка при обработке партии документов {i//batch_size + 1}: {str(e)}", exc_info=True)
-                    # Продолжаем со следующей партией
+                    logging.error(f"Критическая ошибка при обработке партии документов {i//batch_size + 1}: {str(e)}", exc_info=True)
+                    # Прерываем весь процесс при любой ошибке, чтобы не оставлять базу в неконсистентном состоянии
+                    return False
             
-            # Проверяем, все ли документы были добавлены
-            count = collection.count()
-            logging.info(f"Всего в коллекции '{count}' документов.")
-            
-            if count == 0:
-                logging.error("После завершения добавления в коллекции нет документов!")
+            # Проверяем, что мы добавили все документы успешно
+            if total_added == len(docs):
+                logging.info(f"Обновление векторного хранилища успешно завершено. Добавлено {total_added} документов.")
+                # Записываем время обновления в файл
+                save_vector_db_creation_time()
+                return True
+            else:
+                logging.warning(f"Обновление завершено, но добавлено только {total_added}/{len(docs)} документов!")
                 return False
-                
-            logging.info("Обновление векторного хранилища успешно завершено.")
-            return True
             
         except ImportError as ie:
             logging.error(f"Не установлена необходимая библиотека: {str(ie)}")
