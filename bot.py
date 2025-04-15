@@ -284,24 +284,22 @@ async def get_relevant_context(query: str, k: int = 3) -> str:
         
         try:
             import chromadb
-            from chromadb.config import Settings
             from openai import OpenAI
 
-            # Используем тот же подход с in-memory базой и загрузкой из файла
+            # Подключаемся к ChromaDB используя новый API
             logging.info(f"Подключаемся к базе данных для запроса: '{query}'")
-            chroma_client = chromadb.Client(Settings(
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=persist_directory,
-                anonymized_telemetry=False
-            ))
+            chroma_client = chromadb.PersistentClient(
+                path=persist_directory,
+                telemetry_enabled=False
+            )
             
-            # Проверяем доступность клиента
+            # Проверяем доступность коллекций
             try:
-                available_collections = chroma_client.list_collections()
-                collections_found = [coll.name for coll in available_collections]
-                logging.info(f"Доступные коллекции: {collections_found}")
+                collections = chroma_client.list_collections()
+                collection_names = [c.name for c in collections]
+                logging.info(f"Доступные коллекции: {collection_names}")
                 
-                if collection_name not in collections_found:
+                if collection_name not in collection_names:
                     logging.error(f"Коллекция '{collection_name}' не найдена!")
                     return "ВНИМАНИЕ: База данных не содержит нужную коллекцию. Пожалуйста, обновите базу знаний с помощью команды /update."
                 
@@ -585,35 +583,37 @@ async def update_vector_store():
         # --- НАЧАЛО РАБОТЫ С CHROMADB ---
         try:
             import chromadb
-            from chromadb.config import Settings
             from openai import OpenAI
 
             client = OpenAI() 
             model_name = "text-embedding-3-large"
             embed_dim = 1536
             
-            # --- ПОЛНОСТЬЮ МЕНЯЕМ ПОДХОД: ИСПОЛЬЗУЕМ IN-MEMORY ХРАНИЛИЩЕ ---
-            logging.info("ВАЖНОЕ ИЗМЕНЕНИЕ: Используем полностью in-memory ChromaDB вместо файловой базы SQLite")
+            # --- ОБНОВЛЕНИЕ КОНФИГУРАЦИИ ДЛЯ ПОДДЕРЖКИ НОВОГО API CHROMADB ---
+            persist_directory = "./local_vector_db"
+            logging.info(f"Создаем директорию для базы данных: {persist_directory}")
+            os.makedirs(persist_directory, exist_ok=True)
             
-            # Создаем IN-MEMORY клиент вместо PersistentClient
-            logging.info("Создаем клиент ChromaDB в памяти (без SQL)...")
-            chroma_client = chromadb.Client(Settings(
-                chroma_db_impl="duckdb+parquet",
-                persist_directory="./local_vector_db", # Будет использоваться только при вызове persist()
-                anonymized_telemetry=False
-            ))
+            # Создаем клиент ChromaDB по новому API, отключаем телеметрию
+            logging.info("Создаем клиент ChromaDB...")
+            chroma_client = chromadb.PersistentClient(
+                path=persist_directory,
+                telemetry_enabled=False
+            )
             
-            # Создаем новую коллекцию
+            # Очищаем существующую коллекцию, если она есть
             collection_name = "documents"
-            logging.info(f"Создаем коллекцию '{collection_name}'...")
-            # Удаляем старую, если существует
             try:
-                chroma_client.delete_collection(name=collection_name)
-                logging.info(f"Удалена существующая коллекция '{collection_name}'")
-            except:
-                logging.info(f"Коллекция '{collection_name}' не существовала")
-                
+                logging.info(f"Проверяем наличие и удаляем существующую коллекцию '{collection_name}'...")
+                collections = chroma_client.list_collections()
+                if any(c.name == collection_name for c in collections):
+                    chroma_client.delete_collection(name=collection_name)
+                    logging.info(f"Удалена существующая коллекция '{collection_name}'")
+            except Exception as e_coll:
+                logging.warning(f"Ошибка при проверке/удалении коллекции: {str(e_coll)}")
+            
             # Создаем новую коллекцию
+            logging.info(f"Создаем новую коллекцию '{collection_name}'...")
             collection = chroma_client.create_collection(name=collection_name)
             
             # Подготавливаем данные для добавления
@@ -653,17 +653,12 @@ async def update_vector_store():
                     )
                     
                     total_added += len(chunk_texts)
-                    logging.info(f"Добавлено {total_added}/{len(docs)} документов в память.")
+                    logging.info(f"Добавлено {total_added}/{len(docs)} документов.")
                     
                 except Exception as e:
                     logging.error(f"Критическая ошибка при обработке партии документов {i//batch_size + 1}: {str(e)}", exc_info=True)
                     # Прерываем весь процесс при любой ошибке
                     return False
-            
-            # После успешного добавления всех документов, сохраняем на диск
-            logging.info("Сохраняем базу данных из памяти на диск...")
-            chroma_client.persist()
-            logging.info("База данных сохранена на диск!")
             
             # Проверяем, что мы добавили все документы успешно
             if total_added == len(docs):
