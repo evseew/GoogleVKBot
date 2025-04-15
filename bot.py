@@ -931,6 +931,13 @@ async def handle_business_message(message: types.Message):
     logging.info(f"Получено бизнес-сообщение от пользователя {user_id}: {user_input}")
     logging.info(f"Business connection ID: {business_connection_id}")
     
+    # Проверка на специальный символ активации режима тишины
+    if user_input == "_":
+        logging.info(f"Получен специальный символ '_' для активации режима молчания в чате {business_connection_id}")
+        await set_manager_active(business_connection_id, True)
+        await message.answer("🔇 Бот переведен в режим молчания. Менеджер взял диалог на себя.")
+        return
+    
     # Расширенная проверка сообщения от менеджера
     is_from_business = False
     
