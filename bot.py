@@ -289,8 +289,7 @@ async def get_relevant_context(query: str, k: int = 3) -> str:
             # Подключаемся к ChromaDB используя новый API
             logging.info(f"Подключаемся к базе данных для запроса: '{query}'")
             chroma_client = chromadb.PersistentClient(
-                path=persist_directory,
-                telemetry_enabled=False
+                path=persist_directory
             )
             
             # Проверяем доступность коллекций
@@ -594,11 +593,10 @@ async def update_vector_store():
             logging.info(f"Создаем директорию для базы данных: {persist_directory}")
             os.makedirs(persist_directory, exist_ok=True)
             
-            # Создаем клиент ChromaDB по новому API, отключаем телеметрию
+            # Создаем клиент ChromaDB по новому API
             logging.info("Создаем клиент ChromaDB...")
             chroma_client = chromadb.PersistentClient(
-                path=persist_directory,
-                telemetry_enabled=False
+                path=persist_directory
             )
             
             # Очищаем существующую коллекцию, если она есть
