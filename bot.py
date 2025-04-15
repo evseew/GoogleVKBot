@@ -931,8 +931,39 @@ async def handle_business_message(message: types.Message):
     logging.info(f"Получено бизнес-сообщение от пользователя {user_id}: {user_input}")
     logging.info(f"Business connection ID: {business_connection_id}")
     
-    # Проверяем, является ли сообщение от менеджера бизнеса
-    is_from_business = getattr(message, 'is_from_business', False)
+    # Расширенная проверка сообщения от менеджера
+    is_from_business = False
+    
+    # Метод 1: Стандартный атрибут
+    if hasattr(message, 'is_from_business'):
+        is_from_business = message.is_from_business
+        logging.info(f"Атрибут is_from_business: {is_from_business}")
+    
+    # Метод 2: Проверка наличия атрибута from_business_id
+    if hasattr(message, 'from_business_id') and message.from_business_id:
+        is_from_business = True
+        logging.info(f"Найден from_business_id: {message.from_business_id}")
+    
+    # Метод 3: Проверка метаданных сообщения
+    if hasattr(message, 'via_bot') and message.via_bot:
+        is_from_business = True
+        logging.info(f"Сообщение отправлено через бизнес-бота: {message.via_bot}")
+    
+    # Метод 4: Просто в целях отладки - вывести все атрибуты сообщения
+    for attr_name in dir(message):
+        if not attr_name.startswith('_') and not callable(getattr(message, attr_name)):
+            try:
+                attr_value = getattr(message, attr_name)
+                if attr_value and 'business' in str(attr_name).lower():
+                    logging.info(f"Обнаружен бизнес-атрибут: {attr_name} = {attr_value}")
+            except:
+                pass
+    
+    # Временное решение: Ручной режим - определить менеджера по ключевым словам
+    manager_keywords = ["стоимость", "цена", "оплата", "скидк", "акци"]
+    if any(keyword in user_input.lower() for keyword in manager_keywords):
+        logging.info(f"Обнаружено ключевое слово менеджера в сообщении: {user_input}")
+        is_from_business = True
     
     if is_from_business:
         # Это сообщение от менеджера - активируем режим "молчания" бота
@@ -1212,15 +1243,8 @@ async def is_manager_active(business_connection_id):
     if business_connection_id not in manager_presence:
         return False
     
-    # Проверяем, прошло ли достаточно времени с последнего сообщения менеджера
-    current_time = time.time()
-    last_message_time = manager_presence[business_connection_id]["timestamp"]
-    
-    # Если прошло больше MANAGER_ACTIVE_TIMEOUT секунд, считаем менеджера неактивным
-    if current_time - last_message_time > MANAGER_ACTIVE_TIMEOUT:
-        manager_presence[business_connection_id]["active"] = False
-        return False
-    
+    # Возвращаем статус активности - бот молчит, пока менеджер не будет явно деактивирован
+    # командой /unsilence
     return manager_presence[business_connection_id]["active"]
 
 async def set_manager_active(business_connection_id, active=True):
