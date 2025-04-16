@@ -967,12 +967,6 @@ async def handle_business_message(message: types.Message):
             except:
                 pass
     
-    # Временное решение: Ручной режим - определить менеджера по ключевым словам
-    manager_keywords = ["стоимость", "цена", "оплата", "скидк", "акци"]
-    if any(keyword in user_input.lower() for keyword in manager_keywords):
-        logging.info(f"Обнаружено ключевое слово менеджера в сообщении: {user_input}")
-        is_from_business = True
-    
     if is_from_business:
         # Это сообщение от менеджера - активируем режим "молчания" бота
         logging.info(f"Обнаружено сообщение от менеджера бизнеса в чате {business_connection_id}")
