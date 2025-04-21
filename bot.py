@@ -53,7 +53,7 @@ FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")  # ID папки с докуме
 # Добавим константу с ID администратора бота
 ADMIN_USER_ID = 164266775  # Замените на ваш ID пользователя
 # Добавим список ID менеджеров, которые могут переводить бота в режим молчания
-MANAGER_USER_IDS = [7924983011, ADMIN_USER_ID] # Добавьте сюда ID всех ваших менеджеров
+MANAGER_USER_IDS = [7924983011] # Убрали ADMIN_USER_ID. Добавьте сюда ID всех ваших менеджеров, КРОМЕ админа, если он не должен активировать молчание.
 
 # Проверяем, загрузились ли переменные
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY or not ASSISTANT_ID:
