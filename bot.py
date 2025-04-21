@@ -52,6 +52,8 @@ FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")  # ID папки с докуме
 
 # Добавим константу с ID администратора бота
 ADMIN_USER_ID = 164266775  # Замените на ваш ID пользователя
+# Добавим список ID менеджеров, которые могут переводить бота в режим молчания
+MANAGER_USER_IDS = [7924983011, ADMIN_USER_ID] # Добавьте сюда ID всех ваших менеджеров
 
 # Проверяем, загрузились ли переменные
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY or not ASSISTANT_ID:
@@ -933,34 +935,30 @@ async def handle_business_message(message: types.Message):
     logging.info(f"Business connection ID: {business_connection_id}")
 
     # Расширенная проверка сообщения от менеджера
-    is_from_business = False
+    is_from_manager = False
 
     # ----- ДОБАВЛЕНО ДЛЯ ДИАГНОСТИКИ -----
     logging.info(f"[ДИАГНОСТИКА] Атрибуты сообщения в чате {chat_id}:")
     logging.info(f"  - from_user.id: {message.from_user.id}")
     logging.info(f"  - chat.id: {message.chat.id}")
     logging.info(f"  - business_connection_id: {message.business_connection_id}")
-    logging.info(f"  - is_from_business: {getattr(message, 'is_from_business', 'Атрибут отсутствует')}")
-    logging.info(f"  - from_business_id: {getattr(message, 'from_business_id', 'Атрибут отсутствует')}")
+    logging.info(f"  - is_from_manager: {is_from_manager}")
     logging.info(f"  - via_bot: {getattr(message, 'via_bot', 'Атрибут отсутствует')}")
     # --------------------------------------
 
-    # Метод 1: Стандартный атрибут (наиболее предпочтительный)
-    if hasattr(message, 'is_from_business') and message.is_from_business:
-        is_from_business = True
-        logging.info(f"Атрибут is_from_business={message.is_from_business} для чата {chat_id}")
+    # --- НОВАЯ ЛОГИКА ОПРЕДЕЛЕНИЯ МЕНЕДЖЕРА ---
+    # Проверяем, есть ли ID отправителя в списке менеджеров
+    if message.from_user.id in MANAGER_USER_IDS:
+        is_from_manager = True
+        logging.info(f"Сообщение от пользователя {message.from_user.id}, который находится в списке менеджеров.")
+    else:
+        is_from_manager = False
+        logging.info(f"Сообщение от пользователя {message.from_user.id}, которого нет в списке менеджеров.")
+    # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
-    # Можно добавить другие проверки, если is_from_business ненадежен
-    elif hasattr(message, 'from_business_id') and message.from_business_id: # Используем elif и раскомментируем
-        is_from_business = True
-        logging.info(f"Найден from_business_id={message.from_business_id} для чата {chat_id}")
-    elif hasattr(message, 'via_bot') and message.via_bot: # Используем elif и раскомментируем
-        is_from_business = True
-        logging.info(f"Сообщение отправлено через бизнес-бота: {message.via_bot} для чата {chat_id}")
-
-    if is_from_business:
+    if is_from_manager:
         # Это сообщение от менеджера - активируем режим "молчания" бота для ЭТОГО чата
-        logging.info(f"Обнаружено сообщение от менеджера бизнеса в чате {chat_id}. Включаем режим молчания.")
+        logging.info(f"Обнаружено сообщение от менеджера ({message.from_user.id}) в чате {chat_id}. Включаем режим молчания.")
         await set_chat_silence(chat_id, True) # Используем chat_id
         return  # Бот не отвечает на сообщения менеджеров и не обрабатывает их дальше
 
@@ -1238,15 +1236,15 @@ async def unsilence_bot(message: types.Message):
         return
     
     # Проверка, что команду вызвал менеджер (или администратор)
-    is_from_business = getattr(message, 'is_from_business', False)
-    # Дополнительная проверка, если is_from_business не всегда срабатывает
+    is_from_manager = getattr(message, 'is_from_manager', False)
+    # Дополнительная проверка, если is_from_manager не всегда срабатывает
     # (Можно раскомментировать, если нужно более строго)
-    # if not is_from_business and hasattr(message, 'from_business_id') and message.from_business_id:
-    #     is_from_business = True
+    # if not is_from_manager and hasattr(message, 'from_business_id') and message.from_business_id:
+    #     is_from_manager = True
     
     is_admin = message.from_user.id == ADMIN_USER_ID
     
-    if not (is_from_business or is_admin):
+    if not (is_from_manager or is_admin):
         logging.warning(f"Пользователь {message.from_user.id} попытался использовать команду /unsilence, но он не является менеджером/администратором")
         return  # Тихо игнорируем, если не менеджер
     
