@@ -935,10 +935,28 @@ async def handle_business_message(message: types.Message):
     # Расширенная проверка сообщения от менеджера
     is_from_business = False
 
+    # ----- ДОБАВЛЕНО ДЛЯ ДИАГНОСТИКИ -----
+    logging.info(f"[ДИАГНОСТИКА] Атрибуты сообщения в чате {chat_id}:")
+    logging.info(f"  - from_user.id: {message.from_user.id}")
+    logging.info(f"  - chat.id: {message.chat.id}")
+    logging.info(f"  - business_connection_id: {message.business_connection_id}")
+    logging.info(f"  - is_from_business: {getattr(message, 'is_from_business', 'Атрибут отсутствует')}")
+    logging.info(f"  - from_business_id: {getattr(message, 'from_business_id', 'Атрибут отсутствует')}")
+    logging.info(f"  - via_bot: {getattr(message, 'via_bot', 'Атрибут отсутствует')}")
+    # --------------------------------------
+
     # Метод 1: Стандартный атрибут (наиболее предпочтительный)
     if hasattr(message, 'is_from_business') and message.is_from_business:
         is_from_business = True
         logging.info(f"Атрибут is_from_business={message.is_from_business} для чата {chat_id}")
+
+    # Можно добавить другие проверки, если is_from_business ненадежен
+    elif hasattr(message, 'from_business_id') and message.from_business_id: # Используем elif и раскомментируем
+        is_from_business = True
+        logging.info(f"Найден from_business_id={message.from_business_id} для чата {chat_id}")
+    elif hasattr(message, 'via_bot') and message.via_bot: # Используем elif и раскомментируем
+        is_from_business = True
+        logging.info(f"Сообщение отправлено через бизнес-бота: {message.via_bot} для чата {chat_id}")
 
     if is_from_business:
         # Это сообщение от менеджера - активируем режим "молчания" бота для ЭТОГО чата
