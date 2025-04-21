@@ -96,10 +96,10 @@ MESSAGE_COOLDOWN = 3  # минимальный интервал между со�
 
 # Добавляем словарь для отслеживания активных менеджеров в чатах
 # Ключ: business_connection_id, Значение: {timestamp: время последнего сообщения, active: True/False}
-manager_presence = {}
+chat_silence_state = {} # Ключ: chat_id, Значение: True (молчание), False (активен)
 
 # Время в секундах, в течение которого бот "молчит" после появления менеджера
-MANAGER_ACTIVE_TIMEOUT = 1800  # 30 минут
+MANAGER_ACTIVE_TIMEOUT = 1800  # 30 минут # Эта константа больше не нужна в новой логике
 
 async def get_or_create_thread(user_id):
     """Получает или создает новый thread_id для пользователя."""
@@ -925,69 +925,40 @@ async def debug_context(message: types.Message):
 async def handle_business_message(message: types.Message):
     """Обрабатывает входящее сообщение пользователя в бизнес-чате."""
     user_id = message.from_user.id
+    chat_id = message.chat.id # Получаем chat_id
     user_input = message.text
     business_connection_id = message.business_connection_id
 
-    logging.info(f"Получено бизнес-сообщение от пользователя {user_id}: {user_input}")
+    logging.info(f"Получено бизнес-сообщение от пользователя {user_id} в чате {chat_id}: {user_input}")
     logging.info(f"Business connection ID: {business_connection_id}")
-    
-    # Проверка на специальный символ активации режима тишины
-    if user_input == "_":
-        logging.info(f"Получен специальный символ '_' для активации режима молчания в чате {business_connection_id}")
-        await set_manager_active(business_connection_id, True)
-        # Убираем сообщение, чтобы бот просто молча вышел из диалога
-        # await message.answer("🔇 Бот переведен в режим молчания. Менеджер взял диалог на себя.")
-        return
-    
+
     # Расширенная проверка сообщения от менеджера
     is_from_business = False
-    
-    # Метод 1: Стандартный атрибут
-    if hasattr(message, 'is_from_business'):
-        is_from_business = message.is_from_business
-        logging.info(f"Атрибут is_from_business: {is_from_business}")
-    
-    # Метод 2: Проверка наличия атрибута from_business_id
-    if hasattr(message, 'from_business_id') and message.from_business_id:
+
+    # Метод 1: Стандартный атрибут (наиболее предпочтительный)
+    if hasattr(message, 'is_from_business') and message.is_from_business:
         is_from_business = True
-        logging.info(f"Найден from_business_id: {message.from_business_id}")
-    
-    # Метод 3: Проверка метаданных сообщения
-    if hasattr(message, 'via_bot') and message.via_bot:
-        is_from_business = True
-        logging.info(f"Сообщение отправлено через бизнес-бота: {message.via_bot}")
-    
-    # Метод 4: Просто в целях отладки - вывести все атрибуты сообщения
-    for attr_name in dir(message):
-        if not attr_name.startswith('_') and not callable(getattr(message, attr_name)):
-            try:
-                attr_value = getattr(message, attr_name)
-                if attr_value and 'business' in str(attr_name).lower():
-                    logging.info(f"Обнаружен бизнес-атрибут: {attr_name} = {attr_value}")
-            except:
-                pass
-    
+        logging.info(f"Атрибут is_from_business={message.is_from_business} для чата {chat_id}")
+
     if is_from_business:
-        # Это сообщение от менеджера - активируем режим "молчания" бота
-        logging.info(f"Обнаружено сообщение от менеджера бизнеса в чате {business_connection_id}")
-        await set_manager_active(business_connection_id, True)
-        return  # Бот не отвечает на сообщения менеджеров
-    
-    # Проверяем, активен ли менеджер в данном чате
-    if await is_manager_active(business_connection_id):
-        logging.info(f"Бот в режиме молчания в чате {business_connection_id}, т.к. менеджер активен")
-        return  # Если менеджер активен, бот не отвечает на сообщения клиента
-    
+        # Это сообщение от менеджера - активируем режим "молчания" бота для ЭТОГО чата
+        logging.info(f"Обнаружено сообщение от менеджера бизнеса в чате {chat_id}. Включаем режим молчания.")
+        await set_chat_silence(chat_id, True) # Используем chat_id
+        return  # Бот не отвечает на сообщения менеджеров и не обрабатывает их дальше
+
+    # --- Обработка сообщения от КЛИЕНТА --- 
+
+    # Проверяем, должен ли бот молчать в данном чате
+    if await is_chat_silent(chat_id): # Используем chat_id
+        logging.info(f"Бот в режиме молчания для чата {chat_id}, т.к. менеджер активен. Сообщение от {user_id} игнорируется.")
+        return  # Если бот должен молчать в этом чате, игнорируем сообщение клиента
+
     # Проверяем, не слишком ли часто пользователь отправляет сообщения
     current_time = time.time()
     if user_id in user_last_message_time:
         time_since_last_message = current_time - user_last_message_time[user_id]
         if time_since_last_message < MESSAGE_COOLDOWN:
-            await bot.send_message(
-                chat_id=message.chat.id,
-                text="⚠️ Пожалуйста, подождите немного между сообщениями. Обрабатываю ваш предыдущий запрос...",
-                business_connection_id=message.business_connection_id
-            )
+            await message.answer(f"⚠️ Пожалуйста, подождите немного между сообщениями. Обрабатываю ваш предыдущий запрос...")
             return
     
     # Обновляем время последнего сообщения
@@ -1002,11 +973,7 @@ async def handle_business_message(message: types.Message):
     logging.info(f"Отправляем ответ пользователю {user_id}: {response}")
     
     # Отправляем сообщение с business_connection_id
-    await bot.send_message(
-        chat_id=message.chat.id,
-        text=response,
-        business_connection_id=message.business_connection_id
-    )
+    await message.answer(response)
 
 @router.message(F.business_connection_id.is_(None))
 async def handle_message(message: types.Message):
@@ -1058,17 +1025,8 @@ async def process_user_message_queue(user_id):
                 # Получаем ответ
                 response = await chat_with_assistant(user_id, user_input)
                 
-                # Проверяем, является ли сообщение бизнес-сообщением
-                if message.business_connection_id:
-                    # Отправляем ответ с business_connection_id
-                    await bot.send_message(
-                        chat_id=message.chat.id,
-                        text=response,
-                        business_connection_id=message.business_connection_id
-                    )
-                else:
-                    # Отправляем обычный ответ
-                    await message.answer(response)
+                # Отправляем ответ
+                await message.answer(response)
                 
             except Exception as e:
                 logging.error(f"Ошибка при обработке сообщения: {str(e)}")
@@ -1240,65 +1198,49 @@ async def log_context(user_id, query, context):
     except Exception as e:
         logging.error(f"Ошибка при логировании контекста: {str(e)}")
 
-async def is_manager_active(business_connection_id):
-    """Проверяет, активен ли менеджер в данном чате"""
-    if business_connection_id not in manager_presence:
-        return False
-    
-    # Возвращаем статус активности - бот молчит, пока менеджер не будет явно деактивирован
-    # командой /unsilence
-    return manager_presence[business_connection_id]["active"]
+async def is_chat_silent(chat_id):
+    """Проверяет, должен ли бот молчать в данном чате."""
+    # По умолчанию бот не молчит
+    return chat_silence_state.get(chat_id, False)
 
-async def set_manager_active(business_connection_id, active=True):
-    """Устанавливает статус активности менеджера в чате"""
-    manager_presence[business_connection_id] = {
-        "timestamp": time.time(),
-        "active": active
-    }
-    logging.info(f"Менеджер {'активен' if active else 'неактивен'} в чате {business_connection_id}")
-
-@router.message(Command("silence"))
-async def silence_bot(message: types.Message):
-    """Включает режим молчания бота для текущего чата (только для менеджеров)."""
-    # Проверка, что команда вызвана в бизнес-чате
-    if not message.business_connection_id:
-        await message.answer("❌ Эта команда доступна только в бизнес-чатах!")
-        return
-    
-    # Проверка, что команду вызвал менеджер (или администратор)
-    is_from_business = getattr(message, 'is_from_business', False)
-    is_admin = message.from_user.id == ADMIN_USER_ID
-    
-    if not (is_from_business or is_admin):
-        logging.warning(f"Пользователь {message.from_user.id} попытался использовать команду /silence, но он не является менеджером")
-        return  # Тихо игнорируем, если не менеджер
-    
-    # Включаем режим молчания
-    await set_manager_active(message.business_connection_id, True)
-    await message.answer("🔇 Бот переведен в режим молчания. Он не будет отвечать клиентам, пока вы общаетесь в чате.")
+async def set_chat_silence(chat_id, silent: bool):
+    """Устанавливает статус молчания для чата."""
+    chat_silence_state[chat_id] = silent
+    if silent:
+        logging.info(f"Бот переведен в режим молчания для чата {chat_id}")
+    else:
+        logging.info(f"Бот снова активен в чате {chat_id}")
 
 @router.message(Command("unsilence"))
 async def unsilence_bot(message: types.Message):
     """Выключает режим молчания бота для текущего чата (только для менеджеров)."""
     # Проверка, что команда вызвана в бизнес-чате
     if not message.business_connection_id:
-        await message.answer("❌ Эта команда доступна только в бизнес-чатах!")
+        # await message.answer("❌ Эта команда доступна только в бизнес-чатах!") # Не отвечаем, если не бизнес-чат
         return
     
     # Проверка, что команду вызвал менеджер (или администратор)
     is_from_business = getattr(message, 'is_from_business', False)
+    # Дополнительная проверка, если is_from_business не всегда срабатывает
+    # (Можно раскомментировать, если нужно более строго)
+    # if not is_from_business and hasattr(message, 'from_business_id') and message.from_business_id:
+    #     is_from_business = True
+    
     is_admin = message.from_user.id == ADMIN_USER_ID
     
     if not (is_from_business or is_admin):
-        logging.warning(f"Пользователь {message.from_user.id} попытался использовать команду /unsilence, но он не является менеджером")
+        logging.warning(f"Пользователь {message.from_user.id} попытался использовать команду /unsilence, но он не является менеджером/администратором")
         return  # Тихо игнорируем, если не менеджер
     
-    # Выключаем режим молчания
-    if message.business_connection_id in manager_presence:
-        manager_presence[message.business_connection_id]["active"] = False
-        await message.answer("🔊 Режим молчания отключен. Бот снова будет отвечать на сообщения клиентов.")
+    # Выключаем режим молчания для конкретного чата
+    chat_id = message.chat.id
+    if chat_id in chat_silence_state and chat_silence_state[chat_id]:
+        await set_chat_silence(chat_id, False) # Используем новую функцию
+        await message.answer("🔊 Режим молчания отключен для этого чата. Бот снова будет отвечать.")
     else:
+        # Если бот и так был активен, можно ничего не отвечать или сообщить об этом
         await message.answer("ℹ️ Бот уже находится в активном режиме для этого чата.")
+        # pass # Или просто ничего не делать
 
 async def main():
     """Основная функция запуска бота."""
