@@ -1001,9 +1001,10 @@ async def handle_business_message(message: types.Message):
 
         # --- ЛОГИКА ОПРЕДЕЛЕНИЯ МЕНЕДЖЕРА ---
         is_from_manager = False
-        if message.from_user.id in MANAGER_USER_IDS or message.from_user.id == ADMIN_USER_ID: # Добавим и админа сюда для единообразия
+        # Убираем проверку на ADMIN_USER_ID, только менеджеры включают молчание
+        if message.from_user.id in MANAGER_USER_IDS:
             is_from_manager = True
-            logging.info(f"Сообщение от менеджера или администратора {message.from_user.id}.")
+            logging.info(f"Сообщение от менеджера {message.from_user.id}.")
         else:
             is_from_manager = False
         # --- КОНЕЦ ЛОГИКИ ---
