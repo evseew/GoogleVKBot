@@ -923,6 +923,84 @@ async def debug_context(message: types.Message):
             # Добавляем небольшую задержку между сообщениями
             await asyncio.sleep(1)
 
+# ВОССТАНАВЛИВАЕМ УДАЛЕННЫЙ ОБРАБОТЧИК БИЗНЕС-СООБЩЕНИЙ
+@dp.business_message()
+async def handle_business_message(message: types.Message):
+    """Обрабатывает входящее сообщение пользователя в бизнес-чате."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id # Получаем chat_id
+    user_input = message.text
+    business_connection_id = message.business_connection_id
+
+    logging.info(f"Получено бизнес-сообщение от пользователя {user_id} в чате {chat_id}: {user_input}")
+    logging.info(f"Business connection ID: {business_connection_id}")
+
+    # ----- ДИАГНОСТИКА АТРИБУТОВ -----
+    logging.info(f"[ДИАГНОСТИКА] Атрибуты сообщения в чате {chat_id}:")
+    logging.info(f"  - from_user.id: {message.from_user.id}")
+    logging.info(f"  - chat.id: {message.chat.id}")
+    logging.info(f"  - business_connection_id: {message.business_connection_id}")
+    # logging.info(f"  - is_from_business: {getattr(message, 'is_from_business', 'Атрибут отсутствует')}") # Старая проверка
+    # logging.info(f"  - from_business_id: {getattr(message, 'from_business_id', 'Атрибут отсутствует')}") # Старая проверка
+    logging.info(f"  - via_bot: {getattr(message, 'via_bot', 'Атрибут отсутствует')}")
+    # --------------------------------------
+
+    # --- ЛОГИКА ОПРЕДЕЛЕНИЯ МЕНЕДЖЕРА ---
+    # Проверяем, есть ли ID отправителя в списке менеджеров
+    is_from_manager = False
+    if message.from_user.id in MANAGER_USER_IDS:
+        is_from_manager = True
+        logging.info(f"Сообщение от пользователя {message.from_user.id}, который находится в списке менеджеров.")
+    else:
+        is_from_manager = False
+        # logging.info(f"Сообщение от пользователя {message.from_user.id}, которого нет в списке менеджеров.") # Можно не логировать каждый раз
+    # --- КОНЕЦ ЛОГИКИ ---
+
+    if is_from_manager:
+        # Это сообщение от менеджера - активируем режим "молчания" бота для ЭТОГО чата
+        logging.info(f"Обнаружено сообщение от менеджера ({message.from_user.id}) в чате {chat_id}. Включаем режим молчания.")
+        await set_chat_silence(chat_id, True) # Используем chat_id
+        return  # Бот не отвечает на сообщения менеджеров и не обрабатывает их дальше
+
+    # --- Обработка сообщения от КЛИЕНТА --- 
+
+    # Проверяем, должен ли бот молчать в данном чате
+    if await is_chat_silent(chat_id): # Используем chat_id
+        logging.info(f"Бот в режиме молчания для чата {chat_id}, т.к. менеджер активен. Сообщение от {user_id} игнорируется.")
+        return  # Если бот должен молчать в этом чате, игнорируем сообщение клиента
+
+    # Проверяем, не слишком ли часто пользователь отправляет сообщения
+    current_time = time.time()
+    if user_id in user_last_message_time:
+        time_since_last_message = current_time - user_last_message_time[user_id]
+        if time_since_last_message < MESSAGE_COOLDOWN:
+            # Отвечаем через bot.send_message для бизнес-чатов
+            await bot.send_message(
+                chat_id=chat_id, 
+                text=f"⚠️ Пожалуйста, подождите немного между сообщениями. Обрабатываю ваш предыдущий запрос...",
+                business_connection_id=business_connection_id
+            )
+            return
+    
+    # Обновляем время последнего сообщения
+    user_last_message_time[user_id] = current_time
+    
+    # Очищаем старые сообщения перед обработкой нового
+    await cleanup_old_messages()
+    
+    # Получаем ответ напрямую, без очереди
+    response = await chat_with_assistant(user_id, user_input)
+    
+    logging.info(f"Отправляем ответ пользователю {user_id} в чат {chat_id}: {response}")
+    
+    # Отправляем сообщение с business_connection_id
+    await bot.send_message(
+        chat_id=chat_id,
+        text=response,
+        business_connection_id=business_connection_id
+    )
+# КОНЕЦ ВОССТАНОВЛЕННОГО БЛОКА
+
 @router.message(F.business_connection_id.is_(None))
 async def handle_message(message: types.Message):
     """Обрабатывает входящее сообщение пользователя."""
@@ -956,6 +1034,18 @@ async def handle_message(message: types.Message):
 
     # Добавляем сообщение в очередь
     user_message_queues[user_id].append(message)
+
+    # Получаем ответ напрямую, без очереди
+    response = await chat_with_assistant(user_id, user_input)
+
+    logging.info(f"Отправляем ответ пользователю {user_id} в чат {message.chat.id}: {response}")
+
+    # Отправляем сообщение с business_connection_id (ВОЗВРАЩАЕМ КАК БЫЛО)
+    await bot.send_message(
+        chat_id=message.chat.id,
+        text=response,
+        business_connection_id=message.business_connection_id
+    )
 
 async def process_user_message_queue(user_id):
     """Обрабатывает очередь сообщений пользователя"""
