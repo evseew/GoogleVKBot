@@ -923,89 +923,228 @@ async def debug_context(message: types.Message):
             # Добавляем небольшую задержку между сообщениями
             await asyncio.sleep(1)
 
-@dp.business_message()
-async def handle_business_message(message: types.Message):
-    """Обрабатывает входящее сообщение пользователя в бизнес-чате."""
+@router.message(F.business_connection_id.is_(None))
+async def handle_message(message: types.Message):
+    """Обрабатывает входящее сообщение пользователя."""
+    # Обычные сообщения теперь обрабатываются здесь, а бизнес-сообщения - в другом обработчике
+    # Убираем проверку на бизнес-сообщения, так как они обрабатываются другим хендлером
+
     user_id = message.from_user.id
-    chat_id = message.chat.id # Получаем chat_id
     user_input = message.text
-    business_connection_id = message.business_connection_id
 
-    logging.info(f"Получено бизнес-сообщение от пользователя {user_id} в чате {chat_id}: {user_input}")
-    logging.info(f"Business connection ID: {business_connection_id}")
+    logging.info(f"Получено обычное сообщение от пользователя {user_id}: {user_input}")
 
-    # Расширенная проверка сообщения от менеджера
-    is_from_manager = False
+    # Проверяем, не слишком ли часто пользователь отправляет сообщения
+    current_time = time.time()
+    if user_id in user_last_message_time:
+        time_since_last_message = current_time - user_last_message_time[user_id]
+        if time_since_last_message < MESSAGE_COOLDOWN:
+            await message.answer(f"⚠️ Пожалуйста, подождите немного между сообщениями. Обрабатываю ваш предыдущий запрос...")
+            return
 
-    # ----- ДОБАВЛЕНО ДЛЯ ДИАГНОСТИКИ -----
-    logging.info(f"[ДИАГНОСТИКА] Атрибуты сообщения в чате {chat_id}:")
-    logging.info(f"  - from_user.id: {message.from_user.id}")
-    logging.info(f"  - chat.id: {message.chat.id}")
-    logging.info(f"  - business_connection_id: {message.business_connection_id}")
-    logging.info(f"  - is_from_manager: {is_from_manager}")
-    logging.info(f"  - via_bot: {getattr(message, 'via_bot', 'Атрибут отсутствует')}")
-    # --------------------------------------
+    # Обновляем время последнего сообщения
+    user_last_message_time[user_id] = current_time
 
-    # --- НОВАЯ ЛОГИКА ОПРЕДЕЛЕНИЯ МЕНЕДЖЕРА/АДМИНА ---
-    # Проверяем, есть ли ID отправителя в списке менеджеров ИЛИ является ли он админом
-    is_allowed_user = False
-    if message.from_user.id in MANAGER_USER_IDS:
-         is_allowed_user = True
-         logging.info(f"Команду /unsilence вызвал пользователь {message.from_user.id} из списка менеджеров.")
-    elif message.from_user.id == ADMIN_USER_ID:
-         is_allowed_user = True
-         logging.info(f"Команду /unsilence вызвал администратор {message.from_user.id}.")
-    else:
-         logging.warning(f"Пользователь {message.from_user.id} попытался использовать команду /unsilence, но он не является менеджером/администратором")
-         return # Тихо игнорируем, если не менеджер/админ
-    # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+    # Очищаем старые сообщения перед обработкой нового
+    await cleanup_old_messages()
 
-    if is_allowed_user:
-        # Выключаем режим молчания для конкретного чата
-        chat_id = message.chat.id
-        if chat_id in chat_silence_state and chat_silence_state[chat_id]:
-            await set_chat_silence(chat_id, False) # Используем новую функцию
-            await message.answer("🔊 Режим молчания отключен для этого чата. Бот снова будет отвечать.")
-            logging.info(f"Режим молчания отключен для чата {chat_id} пользователем {message.from_user.id}")
-        else:
-            # Если бот и так был активен, можно ничего не отвечать или сообщить об этом
-            await message.answer("ℹ️ Бот уже находится в активном режиме для этого чата.")
-            logging.info(f"Попытка отключить молчание для чата {chat_id} (уже активен) пользователем {message.from_user.id}")
-            # pass # Или просто ничего не делать
+    # Добавляем сообщение в очередь пользователя
+    if user_id not in user_message_queues:
+        user_message_queues[user_id] = deque()
+        # Если это первое сообщение, создаем задачу для обработки очереди
+        asyncio.create_task(process_user_message_queue(user_id))
 
-@router.message(Command("speak"))
-async def unsilence_bot(message: types.Message):
-    """Выключает режим молчания бота для текущего чата (только для менеджеров), используя команду /speak."""
-    # Проверка, что команда вызвана в бизнес-чате
-    if not message.business_connection_id:
-        # await message.answer("❌ Эта команда доступна только в бизнес-чатах!") # Не отвечаем, если не бизнес-чат
-        return
-    
-    # --- НОВАЯ ЛОГИКА ОПРЕДЕЛЕНИЯ МЕНЕДЖЕРА/АДМИНА ---
-    # Проверяем, есть ли ID отправителя в списке менеджеров ИЛИ является ли он админом
-    is_allowed_user = False
-    if message.from_user.id in MANAGER_USER_IDS:
-         is_allowed_user = True
-         logging.info(f"Команду /speak вызвал пользователь {message.from_user.id} из списка менеджеров.")
-    elif message.from_user.id == ADMIN_USER_ID:
-         is_allowed_user = True
-         logging.info(f"Команду /speak вызвал администратор {message.from_user.id}.")
-    else:
-         logging.warning(f"Пользователь {message.from_user.id} попытался использовать команду /speak, но он не является менеджером/администратором")
-         return # Тихо игнорируем, если не менеджер/админ
-    # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+    # Добавляем сообщение в очередь
+    user_message_queues[user_id].append(message)
 
-    # Выключаем режим молчания для конкретного чата
-    chat_id = message.chat.id
-    if chat_id in chat_silence_state and chat_silence_state[chat_id]:
-        await set_chat_silence(chat_id, False) # Используем новую функцию
-        await message.answer("🔊 Режим молчания отключен для этого чата. Бот снова будет отвечать.")
-        logging.info(f"Режим молчания отключен для чата {chat_id} пользователем {message.from_user.id}")
-    else:
-        # Если бот и так был активен, можно ничего не отвечать или сообщить об этом
-        await message.answer("ℹ️ Бот уже находится в активном режиме для этого чата.")
-        logging.info(f"Попытка отключить молчание для чата {chat_id} (уже активен) пользователем {message.from_user.id}")
-        # pass # Или просто ничего не делать
+async def process_user_message_queue(user_id):
+    """Обрабатывает очередь сообщений пользователя"""
+    # Отмечаем, что началась обработка
+    user_processing_locks[user_id] = True
+
+    try:
+        # Обрабатываем сообщения, пока очередь не пуста
+        while user_id in user_message_queues and user_message_queues[user_id]:
+            # Берем первое сообщение из очереди
+            message = user_message_queues[user_id][0]
+            user_input = message.text
+
+            try:
+                # Получаем ответ
+                response = await chat_with_assistant(user_id, user_input)
+
+                # Отправляем ответ
+                await message.answer(response)
+
+            except Exception as e:
+                logging.error(f"Ошибка при обработке сообщения: {str(e)}")
+                # Не отправляем сообщение об ошибке пользователю
+
+            # Удаляем обработанное сообщение из очереди
+            user_message_queues[user_id].popleft()
+
+    finally:
+        # Удаляем блокировку после завершения обработки всех сообщений
+        if user_id in user_processing_locks:
+            del user_processing_locks[user_id]
+
+        # Если очередь пуста, можно очистить её
+        if user_id in user_message_queues and not user_message_queues[user_id]:
+            del user_message_queues[user_id]
+
+# Обновленный класс для работы с бизнес-функциями
+class BusinessFeatures:
+    def __init__(self, bot):
+        self.bot = bot
+        self.connected_businesses = {}  # Хранит информацию о подключенных бизнес-аккаунтах
+
+    async def get_business_info(self, business_id):
+        """Получает информацию о подключенном бизнес-аккаунте"""
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getBusinessInfo"
+            data = {"business_id": business_id}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data) as response:
+                    result = await response.json()
+
+                    if result.get("ok"):
+                        business_info = result.get("result")
+                        # Сохраняем информацию в кэше
+                        self.connected_businesses[business_id] = business_info
+                        return business_info
+                    return None
+        except Exception as e:
+            logging.error(f"Ошибка при получении информации о бизнесе: {str(e)}")
+            return None
+
+    async def set_business_hours(self, business_id, hours):
+        """Устанавливает часы работы для бизнес-аккаунта"""
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setBusinessHours"
+            data = {
+                "business_id": business_id,
+                "hours": hours  # Формат: [{"day_of_week": 1, "start_time": "09:00", "end_time": "18:00"}, ...]
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data) as response:
+                    return await response.json()
+        except Exception as e:
+            logging.error(f"Ошибка при установке часов работы: {str(e)}")
+            return None
+
+    async def set_greeting_message(self, business_id, message_text, language_code="ru"):
+        """Устанавливает приветственное сообщение для бизнес-аккаунта"""
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setBusinessGreetingMessage"
+            data = {
+                "business_id": business_id,
+                "message": message_text,
+                "language_code": language_code
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data) as response:
+                    return await response.json()
+        except Exception as e:
+            logging.error(f"Ошибка при установке приветственного сообщения: {str(e)}")
+            return None
+
+async def periodic_cleanup():
+    """Запускает периодическую очистку логов"""
+    while True:
+        try:
+            await cleanup_old_context_logs()
+            # Запускаем очистку раз в час
+            await asyncio.sleep(3600)
+        except Exception as e:
+            logging.error(f"Ошибка в периодической очистке: {str(e)}")
+            await asyncio.sleep(60)  # Подождем минуту перед следующей попыткой
+
+def save_vector_db_creation_time():
+    """Сохраняет текущее время как время создания/обновления векторной базы данных"""
+    try:
+        # Путь к файлу, где будем хранить время
+        timestamp_file = os.path.join("./local_vector_db", "last_update.txt")
+
+        # Записываем текущее время
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(timestamp_file, "w") as f:
+            f.write(current_time)
+
+        logging.info(f"Сохранено время обновления базы данных: {current_time}")
+        return True
+
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении времени обновления базы: {str(e)}")
+        return False
+
+def get_vector_db_creation_time():
+    """Получает время создания/обновления векторной базы данных"""
+    try:
+        # Сначала проверяем файл с сохраненным временем
+        timestamp_file = os.path.join("./local_vector_db", "last_update.txt")
+        if os.path.exists(timestamp_file):
+            try:
+                with open(timestamp_file, "r") as f:
+                    time_str = f.read().strip()
+                    return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            except Exception as file_err:
+                logging.warning(f"Ошибка при чтении файла времени обновления: {str(file_err)}")
+                # Продолжаем с методом получения времени из модификации файлов
+
+        # Проверяем оба возможных пути
+        possible_paths = [
+            "./local_vector_db",
+            "/Users/test/Documents/GoogleBusinessBot/local_vector_db", # Путь для локальной разработки
+            os.path.join(os.getcwd(), "local_vector_db") # Путь на сервере
+        ]
+
+        for db_path in possible_paths:
+            logging.info(f"Проверяем путь к базе данных: {db_path}")
+            if os.path.exists(db_path):
+                logging.info(f"Найдена директория базы данных: {db_path}")
+
+                # Проверяем файл базы данных SQLite для Chroma
+                chroma_db_file = os.path.join(db_path, "chroma.sqlite3")
+                if os.path.exists(chroma_db_file):
+                    mod_time = os.path.getmtime(chroma_db_file)
+                    return datetime.fromtimestamp(mod_time)
+
+                # Получаем список всех файлов в директории
+                files = [os.path.join(db_path, f) for f in os.listdir(db_path)
+                         if os.path.isfile(os.path.join(db_path, f))]
+
+                if not files:
+                    logging.warning(f"Директория {db_path} существует, но не содержит файлов")
+                    continue
+
+                # Получаем время модификации каждого файла
+                mod_times = [os.path.getmtime(f) for f in files]
+
+                # Находим самое позднее время модификации
+                latest_time = max(mod_times)
+
+                # Исправляем ошибку здесь - было datetime.datetime.fromtimestamp(latest_time)
+                return datetime.fromtimestamp(latest_time)
+
+        logging.error("Не найдена директория базы данных ни по одному из проверяемых путей")
+        return None
+
+    except Exception as e:
+        logging.error(f"Ошибка при получении времени создания базы: {str(e)}")
+        return None
+
+async def log_context(user_id, query, context):
+    """Логирует запрос и контекст в отдельный файл"""
+    try:
+        timestamp = int(time.time())
+        filename = f"context_log_{user_id}_{timestamp}.txt"
+        filepath = os.path.join(LOGS_DIR, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(f"Запрос: {query}\n\n")
+            f.write(f"Контекст:\n{context}\n")
+    except Exception as e:
+        logging.error(f"Ошибка при логировании контекста: {str(e)}")
 
 async def main():
     """Основная функция запуска бота."""
@@ -1028,7 +1167,7 @@ async def main():
         dp.include_router(router)
         
         # Запускаем задачу периодической очистки логов
-        asyncio.create_task(periodic_cleanup())
+        # asyncio.create_task(periodic_cleanup()) # Временно закомментировано для диагностики
         
         logging.info("🤖 Бот готов к работе")
         logging.info("💼 Базовая поддержка бизнес-режима")
