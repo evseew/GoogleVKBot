@@ -923,6 +923,21 @@ async def debug_context(message: types.Message):
             # Добавляем небольшую задержку между сообщениями
             await asyncio.sleep(1)
 
+# ВОЗВРАЩАЕМ ОПРЕДЕЛЕНИЯ is_chat_silent и set_chat_silence
+async def is_chat_silent(chat_id):
+    """Проверяет, должен ли бот молчать в данном чате."""
+    # По умолчанию бот не молчит
+    return chat_silence_state.get(chat_id, False)
+
+async def set_chat_silence(chat_id, silent: bool):
+    """Устанавливает статус молчания для чата."""
+    chat_silence_state[chat_id] = silent
+    if silent:
+        logging.info(f"Бот переведен в режим молчания для чата {chat_id}")
+    else:
+        logging.info(f"Бот снова активен в чате {chat_id}")
+# КОНЕЦ ВОЗВРАЩЕННЫХ ОПРЕДЕЛЕНИЙ
+
 # ВОССТАНАВЛИВАЕМ УДАЛЕННЫЙ ОБРАБОТЧИК БИЗНЕС-СООБЩЕНИЙ
 @dp.business_message()
 async def handle_business_message(message: types.Message):
