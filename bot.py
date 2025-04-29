@@ -406,8 +406,8 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
         logger.info(f"Запущен новый run {run.id} для треда {thread_id}")
 
         # 6. Ожидаем завершения run с таймаутом
-        start_time = time.time()
-        while time.time() - start_time < OPENAI_RUN_TIMEOUT_SECONDS:
+        start_time = time.time() # Используем стандартный time.time()
+        while time.time() - start_time < OPENAI_RUN_TIMEOUT_SECONDS: # И здесь тоже
             await asyncio.sleep(1) # Пауза перед проверкой статуса
             run_status = await openai_client.beta.threads.runs.retrieve(
                 thread_id=thread_id,
