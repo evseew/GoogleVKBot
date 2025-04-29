@@ -9,7 +9,7 @@ import io
 from io import BytesIO
 import signal
 from collections import deque, defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import pytz # Добавим эту строку в начало файла, где импорты
 
 # --- Dependency Imports ---
@@ -90,8 +90,8 @@ except pytz.UnknownTimeZoneError:
     # Можно установить UTC как запасной вариант или выйти
     CHELYABINSK_TZ = pytz.utc
 # Время начала и конца РАБОЧЕГО дня
-WORK_START_TIME = datetime.time(9, 45, tzinfo=CHELYABINSK_TZ)
-WORK_END_TIME = datetime.time(19, 15, tzinfo=CHELYABINSK_TZ)
+WORK_START_TIME = time(9, 45, tzinfo=CHELYABINSK_TZ)
+WORK_END_TIME = time(19, 15, tzinfo=CHELYABINSK_TZ)
 
 # Commands
 CMD_SILENCE = "*****"
@@ -207,11 +207,12 @@ def get_user_key(user_id: int) -> str:
 def is_non_working_hours() -> bool:
     """Проверяет, является ли текущее время нерабочим в Челябинске."""
     # Используем datetime.datetime.now() вместо time.time() для работы с часовыми поясами
-    now_local = datetime.datetime.now(CHELYABINSK_TZ)
-    current_time = now_local.time() # Берем только время
+    now_local = datetime.now(CHELYABINSK_TZ) # datetime здесь - это импортированный класс datetime.datetime
+    current_time_local = now_local.time() # Берем только время
     # Нерабочее время: ПОСЛЕ 19:15 ИЛИ ДО 9:45
     # Сравниваем время без информации о часовом поясе, т.к. now_local уже в нужном поясе
-    is_non_working = current_time >= WORK_END_TIME.replace(tzinfo=None) or current_time < WORK_START_TIME.replace(tzinfo=None)
+    # Используем объекты time, созданные выше
+    is_non_working = current_time_local >= WORK_END_TIME.replace(tzinfo=None) or current_time_local < WORK_START_TIME.replace(tzinfo=None)
     # Логируем для отладки (можно будет убрать потом)
     # logger.debug(f"Проверка времени: Сейчас {now_local.strftime('%H:%M:%S %Z')}. Нерабочее: {is_non_working}")
     return is_non_working
@@ -831,12 +832,12 @@ async def add_message_to_history(user_id: int, role: str, content: str):
 async def cleanup_old_messages_for_user(user_key: str):
      """Удаляет сообщения старше MESSAGE_LIFETIME_DAYS для конкретного пользователя."""
      if user_key in user_messages:
-        now = datetime.now()
+        now_dt = datetime.now() # Используем импортированный класс datetime
         lifetime = timedelta(days=MESSAGE_LIFETIME_DAYS)
         original_count = len(user_messages[user_key])
         user_messages[user_key] = [
             msg for msg in user_messages[user_key]
-            if now - msg['timestamp'] < lifetime
+            if now_dt - msg['timestamp'] < lifetime
         ]
         removed_count = original_count - len(user_messages[user_key])
         if removed_count > 0:
@@ -955,15 +956,15 @@ async def handle_new_message(event: VkBotEvent):
             #     return # Игнорируем сообщение, если сейчас рабочее время
 
             # 3. Проверка кулдауна
-            now = datetime.datetime.now() # Используем datetime для сравнения с user_last_message_time
+            now_dt = datetime.now() # Используем импортированный класс datetime
             last_time = user_last_message_time.get(user_id)
-            if last_time and now - last_time < timedelta(seconds=MESSAGE_COOLDOWN_SECONDS):
+            if last_time and now_dt - last_time < timedelta(seconds=MESSAGE_COOLDOWN_SECONDS):
                 # Отправляем сообщение о кулдауне только если прошло больше N секунд с последнего такого сообщения
                 # чтобы не спамить пользователя. Реализация опущена для краткости.
                 logger.warning(f"Кулдаун для user_id={user_id}. Игнорируем сообщение.")
                 # await send_vk_message(peer_id, f"Пожалуйста, подождите {MESSAGE_COOLDOWN_SECONDS} сек. перед отправкой следующего сообщения.")
                 return
-            user_last_message_time[user_id] = now
+            user_last_message_time[user_id] = now_dt
 
             # 4. Обработка сообщения пользователя (с блокировкой)
             logger.info(f"Получено сообщение от user_id={user_id} (peer_id={peer_id}): '{message_text[:100]}...'")
