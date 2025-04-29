@@ -1,6 +1,6 @@
 import sys
 import os
-import time
+import time as time_module
 import asyncio
 import logging
 import datetime
@@ -406,8 +406,8 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
         logger.info(f"Запущен новый run {run.id} для треда {thread_id}")
 
         # 6. Ожидаем завершения run с таймаутом
-        start_time = time.time() # Используем стандартный time.time()
-        while time.time() - start_time < OPENAI_RUN_TIMEOUT_SECONDS: # И здесь тоже
+        start_time = time_module.time() # ИСПРАВЛЕНИЕ: Используем time_module.time() вместо time.time()
+        while time_module.time() - start_time < OPENAI_RUN_TIMEOUT_SECONDS: # ИСПРАВЛЕНИЕ: И здесь тоже
             await asyncio.sleep(1) # Пауза перед проверкой статуса
             run_status = await openai_client.beta.threads.runs.retrieve(
                 thread_id=thread_id,
@@ -878,7 +878,7 @@ async def cleanup_old_context_logs():
     logger.info("Запуск очистки старых логов контекста...")
     count = 0
     try:
-        now = time.time()
+        now = time_module.time() # ИСПРАВЛЕНИЕ: Используем time_module.time()
         cutoff = now - LOG_RETENTION_SECONDS
         for filename in glob.glob(os.path.join(LOGS_DIR, "context_*.log")):
             try:
