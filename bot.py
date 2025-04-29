@@ -9,7 +9,7 @@ import io
 from io import BytesIO
 import signal
 from collections import deque, defaultdict
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time as dt_time
 import pytz # Добавим эту строку в начало файла, где импорты
 
 # --- Dependency Imports ---
@@ -90,8 +90,8 @@ except pytz.UnknownTimeZoneError:
     # Можно установить UTC как запасной вариант или выйти
     CHELYABINSK_TZ = pytz.utc
 # Время начала и конца РАБОЧЕГО дня
-WORK_START_TIME = time(9, 45, tzinfo=CHELYABINSK_TZ)
-WORK_END_TIME = time(19, 15, tzinfo=CHELYABINSK_TZ)
+WORK_START_TIME = dt_time(9, 45, tzinfo=CHELYABINSK_TZ)
+WORK_END_TIME = dt_time(19, 15, tzinfo=CHELYABINSK_TZ)
 
 # Commands
 CMD_SILENCE = "*****"
@@ -206,12 +206,12 @@ def get_user_key(user_id: int) -> str:
 
 def is_non_working_hours() -> bool:
     """Проверяет, является ли текущее время нерабочим в Челябинске."""
-    # Используем datetime.datetime.now() вместо time.time() для работы с часовыми поясами
+    # Используем datetime.now() вместо time.time() для работы с часовыми поясами
     now_local = datetime.now(CHELYABINSK_TZ) # datetime здесь - это импортированный класс datetime.datetime
-    current_time_local = now_local.time() # Берем только время
+    current_time_local = now_local.time() # now_local.time() возвращает объект datetime.time
     # Нерабочее время: ПОСЛЕ 19:15 ИЛИ ДО 9:45
     # Сравниваем время без информации о часовом поясе, т.к. now_local уже в нужном поясе
-    # Используем объекты time, созданные выше
+    # Используем объекты dt_time, созданные выше
     is_non_working = current_time_local >= WORK_END_TIME.replace(tzinfo=None) or current_time_local < WORK_START_TIME.replace(tzinfo=None)
     # Логируем для отладки (можно будет убрать потом)
     # logger.debug(f"Проверка времени: Сейчас {now_local.strftime('%H:%M:%S %Z')}. Нерабочее: {is_non_working}")
