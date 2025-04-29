@@ -1,0 +1,23 @@
+[Unit]
+Description=GoogleVKBot
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/GoogleVKBot
+ExecStart=/bin/bash -c 'source /root/GoogleVKBot/new_venv/bin/activate && pip install -r /root/GoogleVKBot/requirements.txt && source /root/GoogleVKBot/.env && python /root/GoogleVKBot/bot.py'
+Restart=always
+RestartSec=30
+TimeoutStartSec=180
+StandardOutput=append:/root/GoogleVKBot/logs/bot.log
+StandardError=append:/root/GoogleVKBot/logs/bot_error.log
+
+# Создаем необходимые директории
+ExecStartPre=/bin/mkdir -p /root/GoogleVKBot/logs
+ExecStartPre=/bin/mkdir -p /root/GoogleVKBot/logs/context_logs
+
+[Install]
+WantedBy=multi-user.target 

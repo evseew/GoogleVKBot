@@ -1,8 +1,8 @@
 #!/bin/bash
-# Скрипт настройки сервера для Google Business Bot
+# Скрипт настройки сервера для Google VK Bot
 
 # Выводим информацию о начале установки
-echo "=== Начало установки Google Business Bot ==="
+echo "=== Начало установки Google VK Bot ==="
 echo "Дата: $(date)"
 
 # 1. Создаем директории
@@ -31,9 +31,9 @@ chmod +x start_bot.sh stop_bot.sh update_db.sh control.sh restart.sh
 
 # 6. Создаем сервис systemd
 echo "Настройка systemd сервиса..."
-sudo cp google-business-bot.service /etc/systemd/system/
+sudo cp google-vk-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable google-business-bot
+sudo systemctl enable google-vk-bot
 
 # 7. Настройка crontab для обновления базы
 echo "Настройка планировщика для обновления базы данных..."
@@ -54,6 +54,6 @@ echo "Создание начальной базы данных..."
 ./update_db.sh
 
 echo "=== Установка завершена ==="
-echo "Чтобы запустить бота, выполните: sudo systemctl start google-business-bot"
-echo "Для проверки статуса: sudo systemctl status google-business-bot"
-echo "Для просмотра логов: journalctl -u google-business-bot -f" 
+echo "Чтобы запустить бота, выполните: sudo systemctl start google-vk-bot"
+echo "Для проверки статуса: sudo systemctl status google-vk-bot"
+echo "Для просмотра логов: journalctl -u google-vk-bot -f" 

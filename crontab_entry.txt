@@ -1,2 +1,2 @@
 # Обновление базы данных каждый день в 3:00 утра
-0 3 * * * cd /root/GoogleBusinessBot && ./update_db.sh > /root/GoogleBusinessBot/logs/cron_update.log 2>&1 
+0 3 * * * cd /root/GoogleVKBot && ./update_db.sh > /root/GoogleVKBot/logs/cron_update.log 2>&1 

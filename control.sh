@@ -7,7 +7,7 @@ mkdir -p "$LOG_DIR"
 
 # Функция для вывода справки
 show_help() {
-    echo "Управление ботом Google Business"
+    echo "Управление ботом Google VK Bot"
     echo "Использование: $0 [команда]"
     echo ""
     echo "Доступные команды:"
@@ -121,7 +121,7 @@ check_setup() {
     fi
     
     # Проверка службы systemd
-    if systemctl is-active --quiet google-business-bot; then
+    if systemctl is-active --quiet google-vk-bot; then
         echo "✅ Служба systemd активна"
     else
         echo "❌ Служба systemd не активна!"

@@ -1,4 +1,4 @@
-# Google Business Bot
+# Google VK Bot
 
 Телеграм-бот для бизнес-аккаунта с векторной базой данных документов из Google Drive.
 
@@ -8,8 +8,8 @@
 
 1. Клонируйте репозиторий на сервер:
    ```
-   git clone https://github.com/evseew/GoogleBusinessBot.git
-   cd GoogleBusinessBot
+   git clone https://github.com/evseew/GoogleVKBot.git
+   cd GoogleVKBot
    ```
 
 2. Запустите скрипт установки:
@@ -34,16 +34,16 @@
 
 5. Запустите бота как systemd-сервис:
    ```
-   sudo systemctl start google-business-bot
-   sudo systemctl status google-business-bot
+   sudo systemctl start google-vk-bot
+   sudo systemctl status google-vk-bot
    ```
 
 ### Установка вручную
 
 1. Создайте директорию и скопируйте файлы:
    ```
-   mkdir -p ~/GoogleBusinessBot/logs/context_logs
-   cd ~/GoogleBusinessBot
+   mkdir -p ~/GoogleVKBot/logs/context_logs
+   cd ~/GoogleVKBot
    # Скопируйте все файлы из репозитория
    ```
 
@@ -58,32 +58,32 @@
 
 4. Настройте сервис и cron:
    ```
-   sudo cp google-business-bot.service /etc/systemd/system/
+   sudo cp google-vk-bot.service /etc/systemd/system/
    sudo systemctl daemon-reload
-   sudo systemctl enable google-business-bot
+   sudo systemctl enable google-vk-bot
    (crontab -l 2>/dev/null; cat crontab_entry.txt) | crontab -
    ```
 
 ## Управление ботом
 
-- **Запуск**: `sudo systemctl start google-business-bot` или `./start_bot.sh`
-- **Остановка**: `sudo systemctl stop google-business-bot` или `./stop_bot.sh`
-- **Статус**: `sudo systemctl status google-business-bot` или `./control.sh status`
-- **Перезапуск**: `sudo systemctl restart google-business-bot` или `./restart.sh`
+- **Запуск**: `sudo systemctl start google-vk-bot` или `./start_bot.sh`
+- **Остановка**: `sudo systemctl stop google-vk-bot` или `./stop_bot.sh`
+- **Статус**: `sudo systemctl status google-vk-bot` или `./control.sh status`
+- **Перезапуск**: `sudo systemctl restart google-vk-bot` или `./restart.sh`
 - **Обновление базы**: `./update_db.sh`
-- **Логи службы**: `journalctl -u google-business-bot -f`
+- **Логи службы**: `journalctl -u google-vk-bot -f`
 - **Логи бота**: `tail -f logs/bot.log`
 
 ## Проверка работоспособности
 
 1. Отправьте команду `/start` боту в Telegram
 2. Проверьте логи на наличие ошибок: `tail -f logs/bot.log`
-3. Проверьте статус службы: `sudo systemctl status google-business-bot`
+3. Проверьте статус службы: `sudo systemctl status google-vk-bot`
 
 ## Устранение проблем
 
 - **Бот не запускается**:
-  - Проверьте логи: `journalctl -u google-business-bot -e`
+  - Проверьте логи: `journalctl -u google-vk-bot -e`
   - Убедитесь, что .env содержит правильные ключи API
   - Проверьте права доступа: `chmod +x *.sh`
 
@@ -94,7 +94,7 @@
 - **Обновление из Git**:
   ```
   git pull
-  sudo systemctl restart google-business-bot
+  sudo systemctl restart google-vk-bot
   ```
 
 ## Команды бота
