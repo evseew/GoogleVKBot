@@ -70,7 +70,7 @@
 - **Остановка**: `sudo systemctl stop google-vk-bot` или `./stop_bot.sh`
 - **Статус**: `sudo systemctl status google-vk-bot` или `./control.sh status`
 - **Перезапуск**: `sudo systemctl restart google-vk-bot` или `./restart.sh`
-- **Обновление базы**: `./update_db.sh`
+- **Обновление базы**: Используйте команду /update в чате с ботом (для администратора).
 - **Логи службы**: `journalctl -u google-vk-bot -f`
 - **Логи бота**: `tail -f logs/bot.log`
 
@@ -88,8 +88,7 @@
   - Проверьте права доступа: `chmod +x *.sh`
 
 - **Проблемы с базой данных**:
-  - Обновите базу вручную: `./update_db.sh`
-  - Проверьте логи обновления: `cat logs/db_update.log`
+  - Обновите базу вручную: Используйте команду /update в чате с ботом (для администратора).
 
 - **Обновление из Git**:
   ```
@@ -108,7 +107,6 @@
 
 Логи бота находятся в папке `logs`:
 - Основной лог: `logs/bot.log`
-- Лог обновления базы: `logs/db_update.log`
 
 ## Требования
 

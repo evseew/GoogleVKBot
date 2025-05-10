@@ -13,6 +13,7 @@ from typing import Optional # Добавляем импорт Optional
 from datetime import datetime, timedelta, time as dt_time
 import pytz # Добавим эту строку в начало файла, где импорты
 import shutil
+import requests
 
 # --- Dependency Imports ---
 import vk_api
@@ -36,7 +37,7 @@ import PyPDF2
 
 # LangChain components for specific tasks
 from langchain_openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter # Добавлен MarkdownHeaderTextSplitter
 from langchain_core.documents import Document
 
 # --- Load Environment Variables ---
@@ -75,7 +76,7 @@ except ValueError:
 VECTOR_DB_BASE_PATH = "./local_vector_db" # Базовая директория для всех версий БД
 ACTIVE_DB_INFO_FILE = "active_db_info.txt" # Файл, хранящий имя активной поддиректории БД
 VECTOR_DB_COLLECTION_NAME = "documents_collection" # Имя коллекции ChromaDB
-RELEVANT_CONTEXT_COUNT = 5 # Количество релевантных чанков для контекста
+RELEVANT_CONTEXT_COUNT = 3 # Количество релевантных чанков для контекста
 
 # Bot Behavior Settings
 MESSAGE_LIFETIME_DAYS = 100 # Срок хранения истории сообщений (в памяти)
@@ -176,8 +177,8 @@ try:
     # В текущей vk_api этого нет в удобном виде для LongPoll
     # vk_async_session = vk_api.async_vk.AsyncVkApi(token=VK_GROUP_TOKEN, api_version=VK_API_VERSION).get_api()
     # Инициализация LongPoll остается синхронной
-    longpoll = VkBotLongPoll(vk_session_api, VK_GROUP_ID)
-    logger.info("VK API сессия и Long Poll инициализированы (СИНХРОННО).")
+    # longpoll = VkBotLongPoll(vk_session_api, VK_GROUP_ID) # <-- ЭТА СТРОКА БУДЕТ ЗАКОММЕНТИРОВАНА
+    logger.info("VK API сессия инициализирована (СИНХРОННО). Long Poll будет инициализирован в своем потоке.")
 except vk_api.AuthError as e:
      logger.critical(f"Ошибка авторизации VK: {e}. Проверьте токен группы.", exc_info=True)
      sys.exit(1)
@@ -509,7 +510,7 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
     user_key = get_user_key(user_id)
     thread_id = await get_or_create_thread(user_id)
     if not thread_id:
-        return "Извините, произошла ошибка при инициализации диалога. Пожалуйста, попробуйте позже."
+        return "Произошла внутренняя ошибка при обработке вашего запроса." # ИЗМЕНЕНО
 
     try:
         # 1. Получаем релевантный контекст из базы знаний
@@ -578,13 +579,13 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
                 last_error = getattr(run_status, 'last_error', None)
                 if last_error: error_message += f" Ошибка: {last_error.message} (Код: {last_error.code})"
                 logger.error(error_message)
-                return f"Извините, произошла ошибка при обработке вашего запроса (статус: {run_status.status}). Попробуйте еще раз."
+                return "Произошла внутренняя ошибка при обработке вашего запроса." # ИЗМЕНЕНО
             elif run_status.status == 'requires_action':
                  logger.warning(f"Run {run.id} требует действия (Function Calling?), что не поддерживается в текущей конфигурации.")
                  # TODO: Обработать Function Calling, если он настроен у ассистента
                  # Пока просто прерываем как ошибку
                  await openai_client.beta.threads.runs.cancel(thread_id=thread_id, run_id=run.id)
-                 return "Извините, ассистент запросил действие, которое пока не поддерживается."
+                 return "Произошла внутренняя ошибка при обработке вашего запроса." # ИЗМЕНЕНО
 
         else: # Сработал таймаут цикла while
             logger.warning(f"Превышено время ожидания ({OPENAI_RUN_TIMEOUT_SECONDS}s) ответа от ассистента для run {run.id}, тред {thread_id}")
@@ -593,7 +594,7 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
                 logger.info(f"Отменен run {run.id} из-за таймаута.")
             except Exception as cancel_error:
                 logger.warning(f"Не удалось отменить run {run.id} после таймаута: {cancel_error}")
-            return "Извините, ответ занимает слишком много времени. Попробуйте переформулировать вопрос или повторить попытку позже."
+            return "Произошла внутренняя ошибка при обработке вашего запроса." # ИЗМЕНЕНО
 
         # 7. Получаем ответ ассистента
         messages_response = await openai_client.beta.threads.messages.list(
@@ -622,14 +623,14 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
                       if msg.content and msg.content[0].type == 'text':
                            logger.warning(f"Найден ответ ассистента, но от другого run ({msg.run_id}) - используем его.")
                            return msg.content[0].text.value
-            return "Ассистент обработал запрос, но не смог сформировать текстовый ответ."
+            return "Произошла внутренняя ошибка при обработке вашего запроса." # ИЗМЕНЕНО
 
     except openai.APIError as e:
          logger.error(f"OpenAI API ошибка для user_id={user_id}: {e}", exc_info=True)
-         return f"Произошла ошибка при обращении к OpenAI: {e}. Попробуйте позже."
+         return "Произошла внутренняя ошибка при обработке вашего запроса." # ИЗМЕНЕНО
     except Exception as e:
         logger.error(f"Непредвиденная ошибка в chat_with_assistant для user_id={user_id}: {e}", exc_info=True)
-        return f"Произошла внутренняя ошибка при обработке вашего запроса."
+        return "Произошла внутренняя ошибка при обработке вашего запроса." # Оставлено как есть
 
 
 # --- Vector Store Management (ChromaDB) ---
@@ -653,7 +654,7 @@ async def get_relevant_context(query: str, k: int) -> str:
         except Exception as e:
             logger.error(f"Ошибка при создании эмбеддинга запроса: {e}", exc_info=True)
             # Не возвращаем ошибку пользователю, просто работаем без контекста
-            return "ОШИБКА: Не удалось создать вектор для вашего запроса." # Или вернуть ""
+            return "" # ИЗМЕНЕНО
 
         # 2. Выполняем поиск в ChromaDB
         try:
@@ -666,7 +667,7 @@ async def get_relevant_context(query: str, k: int) -> str:
             logger.debug(f"Поиск в ChromaDB для '{query[:50]}...' выполнен.")
         except Exception as e:
             logger.error(f"Ошибка при выполнении поиска в ChromaDB: {e}", exc_info=True)
-            return "ОШИБКА: Не удалось выполнить поиск в базе знаний." # Или вернуть ""
+            return "" # ИЗМЕНЕНО
 
         # 3. Обрабатываем и форматируем результаты
         if not results or not results.get("ids") or not results["ids"][0]:
@@ -701,27 +702,21 @@ async def get_relevant_context(query: str, k: int) -> str:
 
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при получении контекста: {e}", exc_info=True)
-        return "ОШИБКА: Внутренняя ошибка при поиске информации в базе знаний." # Или вернуть ""
+        return "" # ИЗМЕНЕНО
 
 async def update_vector_store():
     """Обновляет векторное хранилище ChromaDB документами из Google Drive."""
     logger.info("--- Запуск обновления базы знаний ---")
     
-    # Запоминаем текущую активную поддиректорию (если есть), чтобы удалить ее позже в случае успеха
     previous_active_subpath = _get_active_db_subpath()
     logger.info(f"Предыдущая активная поддиректория (для возможного удаления): '{previous_active_subpath}'")
 
-    # Создаем базовую директорию, если ее нет
     os.makedirs(VECTOR_DB_BASE_PATH, exist_ok=True)
 
     if not drive_service:
         logger.error("Обновление базы знаний невозможно: сервис Google Drive не инициализирован.")
         return {"success": False, "error": "Сервис Google Drive не инициализирован", "added_chunks": 0, "total_chunks": 0}
-    # if not vector_collection: # Эту проверку убираем, т.к. мы создаем новую базу
-    #      logger.error("Обновление базы знаний невозможно: коллекция ChromaDB не инициализирована.")
-    #      return False
 
-    # 1. Создаем новую временную директорию для БД
     timestamp_dir_name = datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_new"
     new_db_path = os.path.join(VECTOR_DB_BASE_PATH, timestamp_dir_name)
     logger.info(f"Создание новой временной директории для БД: {new_db_path}")
@@ -731,33 +726,46 @@ async def update_vector_store():
         logger.error(f"Не удалось создать временную директорию '{new_db_path}': {e_mkdir}. Обновление прервано.", exc_info=True)
         return {"success": False, "error": f"Failed to create temp dir: {e_mkdir}", "added_chunks": 0, "total_chunks": 0}
 
-    temp_vector_collection = None # Коллекция во временной директории
+    temp_vector_collection = None
     try:
-        # Инициализируем ChromaDB клиент и коллекцию во временной директории
         temp_chroma_client = chromadb.PersistentClient(path=new_db_path)
         temp_vector_collection = temp_chroma_client.get_or_create_collection(
             name=VECTOR_DB_COLLECTION_NAME,
-            # metadata={"hnsw:space": "cosine"} # Можно добавить, если нужно
         )
         logger.info(f"Временная коллекция '{VECTOR_DB_COLLECTION_NAME}' создана/получена в '{new_db_path}'.")
 
-        # 2. Читаем данные из Google Drive (синхронная функция)
         logger.info("Получение данных из Google Drive...")
-        # Запускаем синхронную функцию в отдельном потоке
         documents_data = await asyncio.to_thread(read_data_from_drive)
         if not documents_data:
             logger.warning("Не найдено документов в Google Drive или произошла ошибка чтения. Обновление прервано.")
-            return False
+            if new_db_path and os.path.exists(new_db_path):
+                try:
+                    shutil.rmtree(new_db_path)
+                    logger.info(f"Временная директория {new_db_path} удалена, так как не найдено документов.")
+                except Exception as e_rm_empty:
+                    logger.error(f"Не удалось удалить временную директорию {new_db_path} после отсутствия документов: {e_rm_empty}")
+            return {"success": False, "error": "No documents found in Google Drive or read error", "added_chunks": 0, "total_chunks": 0}
         logger.info(f"Получено {len(documents_data)} документов из Google Drive.")
 
-        # 2. Подготовка текстов и метаданных
         all_texts = []
         all_metadatas = []
+        
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, # Размер чанка (можно настроить)
-            chunk_overlap=200, # Перекрытие чанков (можно настроить)
+            chunk_size=1000, 
+            chunk_overlap=200, 
             length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""], 
         )
+        
+        markdown_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[
+                ("#", "header_1"),
+                ("##", "header_2"),
+                ("###", "header_3"),
+                ("####", "header_4"),
+            ]
+        )
+        MD_SECTION_MAX_LEN = 2000 
 
         logger.info("Разбиение документов на чанки...")
         for doc_info in documents_data:
@@ -767,40 +775,76 @@ async def update_vector_store():
                 logger.warning(f"Документ '{doc_name}' пуст или содержит только пробелы. Пропускаем.")
                 continue
 
+            enhanced_doc_content = f"Документ: {doc_name}\\n\\n{doc_content}"
+            chunk_index_in_doc = 0
+            
+            is_markdown = doc_name.lower().endswith('.md') or \
+                          any(marker in doc_content for marker in ['\n# ', '\n## ', '\n### ', '\n#### ', '* ', '- ', '1. '])
+
             try:
-                chunks = text_splitter.split_text(doc_content)
-                for i, chunk in enumerate(chunks):
-                    all_texts.append(chunk)
-                    all_metadatas.append({"source": doc_name, "chunk": i})
-                logger.info(f"Документ '{doc_name}' разбит на {len(chunks)} чанков.")
+                if is_markdown:
+                    logger.info(f"Документ '{doc_name}' обрабатывается как Markdown.")
+                    md_header_splits = markdown_splitter.split_text(enhanced_doc_content)
+                    
+                    for md_split in md_header_splits:
+                        headers_metadata = {k: v for k, v in md_split.metadata.items() if k.startswith('header_')}
+                        if len(md_split.page_content) > MD_SECTION_MAX_LEN:
+                            logger.info(f"Секция Markdown из '{doc_name}' (заголовок: {headers_metadata.get('header_1', 'N/A')}) слишком длинная ({len(md_split.page_content)} символов), разбиваем дополнительно...")
+                            smaller_chunks = text_splitter.split_text(md_split.page_content)
+                            for sub_chunk in smaller_chunks:
+                                all_texts.append(sub_chunk)
+                                all_metadatas.append({
+                                    "source": doc_name,
+                                    "document_type": "markdown_section_split",
+                                    **headers_metadata,
+                                    "chunk": chunk_index_in_doc
+                                })
+                                chunk_index_in_doc += 1
+                            logger.info(f"Длинная секция разбита на {len(smaller_chunks)} под-чанков.")
+                        else:
+                            all_texts.append(md_split.page_content)
+                            all_metadatas.append({
+                                "source": doc_name,
+                                "document_type": "markdown",
+                                **headers_metadata,
+                                "chunk": chunk_index_in_doc
+                            })
+                            chunk_index_in_doc += 1
+                else:
+                    logger.info(f"Документ '{doc_name}' обрабатывается как обычный текст.")
+                    chunks = text_splitter.split_text(enhanced_doc_content)
+                    for chunk_text in chunks:
+                        all_texts.append(chunk_text)
+                        all_metadatas.append({"source": doc_name, "document_type": "text", "chunk": chunk_index_in_doc})
+                        chunk_index_in_doc += 1
+                
+                logger.info(f"Документ '{doc_name}' разбит на {chunk_index_in_doc} чанков.")
+
             except Exception as e:
                 logger.error(f"Ошибка при разбиении документа '{doc_name}': {e}", exc_info=True)
-                continue # Пропускаем битый документ
+                if is_markdown:
+                    logger.warning(f"Попытка обработать '{doc_name}' как обычный текст после ошибки Markdown-разбиения.")
+                    try:
+                        chunks = text_splitter.split_text(enhanced_doc_content)
+                        chunk_index_in_doc = 0 
+                        for chunk_text in chunks:
+                            all_texts.append(chunk_text)
+                            all_metadatas.append({"source": doc_name, "document_type": "text_fallback", "chunk": chunk_index_in_doc})
+                            chunk_index_in_doc += 1
+                        logger.info(f"Документ '{doc_name}' (fallback) разбит на {chunk_index_in_doc} чанков.")
+                    except Exception as fallback_e:
+                        logger.error(f"Ошибка при fallback-разбиении документа '{doc_name}': {fallback_e}", exc_info=True)
+                continue 
 
         if not all_texts:
             logger.warning("После обработки не осталось текстовых данных для добавления в базу. Обновление прервано.")
-            return False
-
-        logger.info(f"Всего подготовлено {len(all_texts)} чанков для добавления/обновления.")
-
-        # 3. Добавление/Обновление данных в ChromaDB
-        # Рекомендуется очищать коллекцию перед полным обновлением,
-        # если не требуется сохранять старые данные или если ID не стабильны.
-        # Или использовать collection.upsert, если есть стабильные ID для чанков.
-
-        # logger.info(f"Очистка старых данных в коллекции '{VECTOR_DB_COLLECTION_NAME}'...") # Очистка не нужна, т.к. директория новая
-        # try:
-        #     # Получаем все текущие ID и удаляем их
-        #     # Это может быть неэффективно для очень больших баз
-        #     existing_ids = await asyncio.to_thread(vector_collection.get, include=[]) # Только ID
-        #     if existing_ids and existing_ids.get('ids'):
-        #          await asyncio.to_thread(vector_collection.delete, ids=existing_ids['ids'])
-        #          logger.info(f"Удалено {len(existing_ids['ids'])} старых записей.")
-        #     else:
-        #          logger.info("Коллекция была пуста, удалять нечего.")
-        # except Exception as e:
-        #      logger.error(f"Ошибка при очистке коллекции '{VECTOR_DB_COLLECTION_NAME}': {e}. Обновление может быть неполным.", exc_info=True)
-        #      # Продолжаем попытку добавить новые данные
+            if new_db_path and os.path.exists(new_db_path):
+                try:
+                    shutil.rmtree(new_db_path)
+                    logger.info(f"Временная директория {new_db_path} удалена, так как нет данных для добавления.")
+                except Exception as e_rm_nodata:
+                    logger.error(f"Не удалось удалить временную директорию {new_db_path} после отсутствия данных: {e_rm_nodata}")
+            return {"success": False, "error": "No text data left after processing to add to the database", "added_chunks": 0, "total_chunks": 0}
 
         logger.info(f"Добавление {len(all_texts)} новых чанков во временную коллекцию...")
         try:
@@ -1297,7 +1341,7 @@ async def handle_new_message(event: VkBotEvent):
                 command = message_text.lower()
                 if command == CMD_SILENCE.lower():
                     await silence_user(peer_id)
-                    await send_vk_message(peer_id, "#") # ИЗМЕНЕНО: Отправляем # вместо текста
+                    # await send_vk_message(peer_id, "#") # ИЗМЕНЕНО: Закомментирована отправка сообщения
                     return # Команда обработана
 
                 elif command == CMD_SPEAK.lower():
@@ -1488,18 +1532,80 @@ async def main():
 # --- (Опционально) Функция для запуска синхронного LongPoll в потоке ---
 def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
     logger.info("Запуск синхронного Long Poll в отдельном потоке...")
-    try:
-        for event in longpoll.listen():
-             if event.type == VkBotEventType.MESSAGE_NEW:
-                 # Безопасно передаем задачу в основной асинхронный цикл
-                 asyncio.run_coroutine_threadsafe(handle_new_message(event), async_loop)
-             else:
-                  logger.debug(f"[Thread] Пропускаем событие типа {event.type}")
-    except Exception as e:
-         logger.error(f"Ошибка в потоке Long Poll: {e}", exc_info=True)
-    finally:
-         logger.info("Поток Long Poll завершен.")
-# ---------------------------------------------------------------------
+    
+    # Параметры для переподключения
+    MAX_RECONNECT_ATTEMPTS = 5  # Максимальное количество попыток подряд
+    RECONNECT_DELAY_SECONDS = 30 # Задержка перед повторной попыткой
+
+    current_attempts = 0
+    
+    # Глобальный vk_session_api и VK_GROUP_ID используются для пересоздания longpoll
+    global vk_session_api 
+    global VK_GROUP_ID
+
+    while True: # Внешний цикл для переподключения
+        try:
+            if not vk_session_api: # На случай, если сессия не была создана
+                logger.error("[Thread LongPoll] vk_session_api не инициализирована. Невозможно запустить LongPoll.")
+                # Можно добавить уведомление администратору или более сложную логику
+                time_module.sleep(RECONNECT_DELAY_SECONDS * 5) # Длительная пауза перед следующей попыткой
+                continue
+
+            logger.info(f"[Thread LongPoll] Попытка инициализации VkBotLongPoll (попытка {current_attempts + 1}).")
+            # Пересоздаем longpoll при каждой попытке подключения (или первой)
+            # Это важно, так как предыдущий экземпляр мог быть в невалидном состоянии
+            current_longpoll = VkBotLongPoll(vk_session_api, VK_GROUP_ID)
+            logger.info("[Thread LongPoll] VkBotLongPoll успешно инициализирован.")
+            
+            current_attempts = 0 # Сбрасываем счетчик попыток при успешной инициализации
+
+            logger.info("[Thread LongPoll] Начало прослушивания событий...")
+            for event in current_longpoll.listen():
+                if event.type == VkBotEventType.MESSAGE_NEW:
+                    asyncio.run_coroutine_threadsafe(handle_new_message(event), async_loop)
+                else:
+                    logger.debug(f"[Thread LongPoll] Пропускаем событие типа {event.type}")
+            
+            # Если цикл listen() завершился штатно (маловероятно для LongPoll, обычно он вечный или падает с ошибкой)
+            logger.warning("[Thread LongPoll] Цикл listen() завершился штатно. Перезапуск через задержку...")
+            current_attempts = 0 # Сбрасываем, чтобы следующая попытка была как первая
+            time_module.sleep(RECONNECT_DELAY_SECONDS)
+
+
+        except (requests.exceptions.ConnectionError, 
+                  requests.exceptions.ReadTimeout, 
+                  requests.exceptions.ChunkedEncodingError, # Может возникать при проблемах с сетью
+                  vk_api.exceptions.VkApiError, # Общее исключение API VK
+                  # BrokenPipeError обычно наследуется от ConnectionError или OSError
+                  # OSError # Можно добавить для более широкого охвата
+                 ) as e:
+            logger.error(f"[Thread LongPoll] Ошибка сети или VK API в цикле Long Poll: {e}", exc_info=True)
+            current_attempts += 1
+            if MAX_RECONNECT_ATTEMPTS > 0 and current_attempts >= MAX_RECONNECT_ATTEMPTS:
+                logger.critical(f"[Thread LongPoll] Превышено максимальное количество ({MAX_RECONNECT_ATTEMPTS}) попыток переподключения. Поток Long Poll останавливается.")
+                # Здесь можно добавить отправку уведомления администратору
+                asyncio.run_coroutine_threadsafe(send_vk_message(ADMIN_USER_ID, "Критическая ошибка: Поток VK Long Poll остановлен после множества неудачных попыток переподключения."), async_loop)
+                break # Выход из внешнего цикла while True
+
+            logger.info(f"[Thread LongPoll] Пауза {RECONNECT_DELAY_SECONDS} секунд перед попыткой {current_attempts + 1}...")
+            time_module.sleep(RECONNECT_DELAY_SECONDS)
+        
+        except Exception as e:
+            # Ловим все остальные непредвиденные ошибки, чтобы поток не умер молча
+            logger.critical(f"[Thread LongPoll] Непредвиденная критическая ошибка в цикле Long Poll: {e}", exc_info=True)
+            # Для таких ошибок можно решить, стоит ли пытаться переподключаться
+            # или лучше остановить поток, чтобы не вызывать проблем.
+            # Пока что будем пытаться переподключиться, но с увеличенной задержкой.
+            current_attempts += 1
+            if MAX_RECONNECT_ATTEMPTS > 0 and current_attempts >= MAX_RECONNECT_ATTEMPTS:
+                 logger.critical(f"[Thread LongPoll] Превышено максимальное количество ({MAX_RECONNECT_ATTEMPTS}) попыток после непредвиденной ошибки. Поток Long Poll останавливается.")
+                 asyncio.run_coroutine_threadsafe(send_vk_message(ADMIN_USER_ID, "Критическая ошибка: Поток VK Long Poll остановлен после множества неудачных попыток (непредвиденная ошибка)."), async_loop)
+                 break
+            
+            logger.info(f"[Thread LongPoll] Пауза {RECONNECT_DELAY_SECONDS * 2} секунд перед попыткой {current_attempts + 1} после непредвиденной ошибки...")
+            time_module.sleep(RECONNECT_DELAY_SECONDS * 2)
+
+    logger.info("[Thread LongPoll] Поток Long Poll завершен.")
 
 
 if __name__ == "__main__":
