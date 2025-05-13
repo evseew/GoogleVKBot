@@ -1563,8 +1563,7 @@ def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
             for event in current_longpoll.listen():
                 if event.type == VkBotEventType.MESSAGE_NEW:
                     # Передаем событие в обработчик новых сообщений
-                    # Запускаем асинхронную функцию в основном цикле событий из потока
-                    asyncio.run_coroutine_threadsafe(handle_new_message(event), async_loop)
+                    await handle_new_message(event)
                 else:
                     # Логируем пропускаемые события в DEBUG, чтобы не засорять основной лог
                     logger.debug(f"Пропускаем событие типа {event.type}")
