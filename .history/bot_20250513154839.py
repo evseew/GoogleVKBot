@@ -1599,26 +1599,28 @@ def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
                             else:
                                 # Этот random_id не был сгенерирован ботом, или random_id отсутствует.
                                 # Считаем, что это сообщение от CRM/оператора.
-                                crm_message_text = event.obj.get('text', '') 
-                                logger.info(f"MESSAGE_REPLY от CRM/оператора (текст: '{crm_message_text[:50]}...', random_id: {event_random_id}) для peer_id={peer_id}. Активируем ПОСТОЯННЫЙ режим молчания.")
+                                crm_message_text = event.obj.get('text', '').strip().lower()
                                 
-                                if peer_id:
-                                    chat_silence_state[peer_id] = True # Просто включаем молчание
-                                    
-                                    # Отменяем предыдущий таймер, если он существует, чтобы CRM-молчание было главным
-                                    existing_task = chat_silence_timers.pop(peer_id, None)
-                                    if existing_task:
-                                        try:
-                                            if not existing_task.done():
-                                                existing_task.cancel()
-                                                # Даем циклу событий обработать отмену
-                                                # В синхронном коде это не нужно, но если бы это был async def: await asyncio.sleep(0) 
-                                            logger.info(f"Предыдущий таймер молчания для peer_id={peer_id} отменен из-за вмешательства CRM.")
-                                        except Exception as e_cancel_crm:
-                                            logger.warning(f"Не удалось отменить предыдущий таймер для peer_id={peer_id} при вмешательстве CRM: {e_cancel_crm}")
-                                    logger.info(f"Постоянный режим молчания активирован для peer_id={peer_id} из-за сообщения от CRM.")
+                                if crm_message_text == CMD_SPEAK.lower():
+                                    logger.info(f"MESSAGE_REPLY от CRM/оператора с командой '{CMD_SPEAK}' для peer_id={peer_id}. Деактивируем режим молчания.")
+                                    if peer_id:
+                                        asyncio.run_coroutine_threadsafe(unsilence_user(peer_id), async_loop)
+                                    else:
+                                        logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для команды '{CMD_SPEAK}': {event.obj}")
+                                elif crm_message_text == CMD_SILENCE.lower():
+                                    logger.info(f"MESSAGE_REPLY от CRM/оператора с командой '{CMD_SILENCE}' для peer_id={peer_id}. Активируем/перезапускаем режим молчания.")
+                                    if peer_id:
+                                        asyncio.run_coroutine_threadsafe(silence_user(peer_id), async_loop)
+                                    else:
+                                        logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для команды '{CMD_SILENCE}': {event.obj}")
                                 else:
-                                    logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для активации постоянного режима молчания: {event.obj}")
+                                    # Это обычное сообщение от CRM/оператора, не команда speak/silence
+                                    logger.info(f"MESSAGE_REPLY от CRM/оператора (текст: '{crm_message_text[:50]}...', random_id: {event_random_id}) для peer_id={peer_id}. Активируем/перезапускаем режим молчания.")
+                                    if peer_id:
+                                        # Запускаем silence_user в основном цикле asyncio
+                                        asyncio.run_coroutine_threadsafe(silence_user(peer_id), async_loop)
+                                    else:
+                                        logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для активации режима молчания: {event.obj}")
                         else:
                             logger.debug(f"Пропускаем MESSAGE_REPLY, не соответствующее условиям (out=1, from_id=-GROUP_ID): {event.obj}")
                     except Exception as e_reply_proc:
