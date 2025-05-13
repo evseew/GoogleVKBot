@@ -1583,34 +1583,6 @@ def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
                     # Передаем событие в обработчик новых сообщений
                     # Запускаем асинхронную функцию в основном цикле событий из потока
                     asyncio.run_coroutine_threadsafe(handle_new_message(event), async_loop)
-                
-                elif event.type == VkBotEventType.MESSAGE_REPLY: # <--- НОВАЯ ОБРАБОТКА
-                    logger.debug(f"Получено событие MESSAGE_REPLY: {event.obj}")
-                    try:
-                        if event.obj.get('out') == 1 and event.obj.get('from_id') == -int(VK_GROUP_ID):
-                            # Это исходящее сообщение от имени нашей группы
-                            event_random_id = event.obj.get('random_id')
-                            peer_id = event.obj.get('peer_id')
-
-                            if event_random_id is not None and event_random_id in MY_PENDING_RANDOM_IDS:
-                                # Это random_id, который сгенерировал наш бот
-                                MY_PENDING_RANDOM_IDS.remove(event_random_id)
-                                logger.debug(f"MESSAGE_REPLY от нашего бота (random_id: {event_random_id}) для peer_id={peer_id}. Удален из MY_PENDING_RANDOM_IDS.")
-                            else:
-                                # Этот random_id не был сгенерирован ботом, или random_id отсутствует.
-                                # Считаем, что это сообщение от CRM/оператора.
-                                logger.info(f"MESSAGE_REPLY от CRM/оператора (random_id: {event_random_id}) для peer_id={peer_id}. Активируем режим молчания.")
-                                if peer_id:
-                                    # Запускаем silence_user в основном цикле asyncio
-                                    asyncio.run_coroutine_threadsafe(silence_user(peer_id), async_loop)
-                                else:
-                                    logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для активации режима молчания: {event.obj}")
-                        else:
-                            logger.debug(f"Пропускаем MESSAGE_REPLY, не соответствующее условиям (out=1, from_id=-GROUP_ID): {event.obj}")
-                    except Exception as e_reply_proc:
-                        logger.error(f"Ошибка при обработке MESSAGE_REPLY: {e_reply_proc}", exc_info=True)
-                        logger.debug(f"Содержимое ошибочного MESSAGE_REPLY: {event.obj}")
-
                 else:
                     # Логируем пропускаемые события в DEBUG, чтобы не засорять основной лог
                     logger.debug(f"Пропускаем событие типа {event.type}")

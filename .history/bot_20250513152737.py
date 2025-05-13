@@ -22,7 +22,6 @@ import threading
 # --- Dependency Imports ---
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEvent, VkBotEventType
-from vk_api.utils import get_random_id # <--- ДОБАВЛЕНО СЮДА
 # ВАЖНО: vk_api.VkBotLongPoll - СИНХРОННЫЙ. Для асинхронной работы нужен
 # либо другой механизм (Callback API), либо асинхронная библиотека VK,
 # либо запуск LongPoll в отдельном потоке. Текущая реализация с asyncio.create_task
@@ -156,7 +155,6 @@ user_processing_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock
 user_last_message_time: dict[int, datetime] = {} # {user_id: timestamp}
 chat_silence_state: dict[int, bool] = {} # {peer_id: True if silent}
 chat_silence_timers: dict[int, asyncio.Task] = {} # {peer_id: silence timer task}
-MY_PENDING_RANDOM_IDS = set() # <--- ДОБАВЛЕНО СЮДА
 
 # Для буферизации сообщений
 pending_messages: dict[int, list[str]] = {}  # {peer_id: [text1, text2]} - Буфер сообщений
@@ -296,33 +294,21 @@ async def send_vk_message(peer_id: int, message: str):
         return
     try:
         # Используем синхронный метод API через to_thread
-        current_random_id = vk_api.utils.get_random_id() # Генерируем random_id
-        MY_PENDING_RANDOM_IDS.add(current_random_id) # Сохраняем его
-        logger.debug(f"Добавлен random_id {current_random_id} в MY_PENDING_RANDOM_IDS для peer_id={peer_id}")
-
         await asyncio.to_thread(
             vk_session_api.method, # Передаем сам метод
             'messages.send',
             {
                 'peer_id': peer_id,
                 'message': message,
-                'random_id': current_random_id # Используем сохраненный random_id
+                'random_id': vk_api.utils.get_random_id() # Важно для предотвращения дублей
             }
         )
-        # logger.info(f"Сообщение отправлено в peer_id={peer_id}: '{message[:50]}...'"
-        # Важно: Не удаляем random_id из MY_PENDING_RANDOM_IDS здесь.
-        # Он будет удален при получении соответствующего события MESSAGE_REPLY.
+        # logger.info(f"Сообщение отправлено в peer_id={peer_id}: '{message[:50]}...'")
     except vk_api.exceptions.ApiError as e:
         logger.error(f"Ошибка VK API при отправке сообщения в peer_id={peer_id}: {e}", exc_info=True)
-        # Если отправка не удалась, нужно удалить random_id, так как MESSAGE_REPLY не придет
-        if 'current_random_id' in locals() and current_random_id in MY_PENDING_RANDOM_IDS:
-            MY_PENDING_RANDOM_IDS.remove(current_random_id)
-            logger.debug(f"Удален random_id {current_random_id} из MY_PENDING_RANDOM_IDS из-за ошибки отправки для peer_id={peer_id}")
+        # Здесь можно добавить обработку специфических ошибок (например, пользователь заблокировал)
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при отправке сообщения в peer_id={peer_id}: {e}", exc_info=True)
-        if 'current_random_id' in locals() and current_random_id in MY_PENDING_RANDOM_IDS:
-            MY_PENDING_RANDOM_IDS.remove(current_random_id)
-            logger.debug(f"Удален random_id {current_random_id} из MY_PENDING_RANDOM_IDS из-за ошибки отправки для peer_id={peer_id}")
 
 async def set_typing_activity(peer_id: int):
      """Устанавливает статус 'печатает' в VK."""
@@ -1583,34 +1569,6 @@ def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
                     # Передаем событие в обработчик новых сообщений
                     # Запускаем асинхронную функцию в основном цикле событий из потока
                     asyncio.run_coroutine_threadsafe(handle_new_message(event), async_loop)
-                
-                elif event.type == VkBotEventType.MESSAGE_REPLY: # <--- НОВАЯ ОБРАБОТКА
-                    logger.debug(f"Получено событие MESSAGE_REPLY: {event.obj}")
-                    try:
-                        if event.obj.get('out') == 1 and event.obj.get('from_id') == -int(VK_GROUP_ID):
-                            # Это исходящее сообщение от имени нашей группы
-                            event_random_id = event.obj.get('random_id')
-                            peer_id = event.obj.get('peer_id')
-
-                            if event_random_id is not None and event_random_id in MY_PENDING_RANDOM_IDS:
-                                # Это random_id, который сгенерировал наш бот
-                                MY_PENDING_RANDOM_IDS.remove(event_random_id)
-                                logger.debug(f"MESSAGE_REPLY от нашего бота (random_id: {event_random_id}) для peer_id={peer_id}. Удален из MY_PENDING_RANDOM_IDS.")
-                            else:
-                                # Этот random_id не был сгенерирован ботом, или random_id отсутствует.
-                                # Считаем, что это сообщение от CRM/оператора.
-                                logger.info(f"MESSAGE_REPLY от CRM/оператора (random_id: {event_random_id}) для peer_id={peer_id}. Активируем режим молчания.")
-                                if peer_id:
-                                    # Запускаем silence_user в основном цикле asyncio
-                                    asyncio.run_coroutine_threadsafe(silence_user(peer_id), async_loop)
-                                else:
-                                    logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для активации режима молчания: {event.obj}")
-                        else:
-                            logger.debug(f"Пропускаем MESSAGE_REPLY, не соответствующее условиям (out=1, from_id=-GROUP_ID): {event.obj}")
-                    except Exception as e_reply_proc:
-                        logger.error(f"Ошибка при обработке MESSAGE_REPLY: {e_reply_proc}", exc_info=True)
-                        logger.debug(f"Содержимое ошибочного MESSAGE_REPLY: {event.obj}")
-
                 else:
                     # Логируем пропускаемые события в DEBUG, чтобы не засорять основной лог
                     logger.debug(f"Пропускаем событие типа {event.type}")
