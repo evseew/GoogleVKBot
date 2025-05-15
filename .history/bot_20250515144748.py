@@ -1,25 +1,22 @@
 import sys
 import os
-import time as time_module # Используется
+import time as time_module
 import asyncio
 import logging
-import datetime # Используется datetime.datetime, datetime.time, datetime.date, datetime.timedelta
-# from datetime import timezone # Удалено, будем использовать pytz.utc
-import glob # Используется
-import io # Используется
-from io import BytesIO # Используется
-# import signal # Удалено, не используется явно
-# from collections import deque # Удалено, не используется
-from collections import defaultdict # Используется
-from typing import Optional, List, Dict, Any, Union # Добавлены для лучшей типизации
-
-import pytz # Используется
-import shutil # Используется
-import requests # Используется
-import json # Используется
-import random # Используется
-import re # Используется
-import threading # Используется
+import datetime
+import glob
+import io
+from io import BytesIO
+from collections import defaultdict
+from typing import Optional
+from datetime import datetime, timedelta
+import pytz
+import shutil
+import requests
+import json
+import random
+import re
+import threading
 
 # --- Dependency Imports ---
 import vk_api
@@ -38,7 +35,6 @@ import PyPDF2
 # LangChain components for specific tasks
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
-# from langchain_core.documents import Document # Удалено, если не используется напрямую
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -46,17 +42,8 @@ load_dotenv()
 # --- Configuration ---
 # VK API Settings
 VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN")
-VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
-
-# Исправление №9: Преобразование VK_GROUP_ID в int сразу
 VK_GROUP_ID_STR = os.getenv("VK_GROUP_ID")
-if not VK_GROUP_ID_STR:
-    raise ValueError("❌ Ошибка: VK_GROUP_ID не найден в .env!")
-try:
-    VK_GROUP_ID = int(VK_GROUP_ID_STR)
-except ValueError:
-    raise ValueError("❌ Ошибка: VK_GROUP_ID должен быть числом в .env!")
-
+VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
 
 # OpenAI Settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -87,7 +74,6 @@ VECTOR_DB_COLLECTION_NAME = "documents_collection"
 RELEVANT_CONTEXT_COUNT = 3
 
 # Bot Behavior Settings
-# MESSAGE_LIFETIME_DAYS = 100 # Удалено, если не используется для хранения истории в памяти
 MESSAGE_COOLDOWN_SECONDS = 3
 MESSAGE_BUFFER_SECONDS = 4
 LOG_RETENTION_SECONDS = 86400
@@ -98,11 +84,10 @@ TIMEZONE_STR = os.getenv("TIMEZONE_STR", "Asia/Yekaterinburg")
 WORK_START_HHMM = os.getenv("WORK_START_HHMM", "09:45")
 WORK_END_HHMM = os.getenv("WORK_END_HHMM", "19:15")
 
-# Логгер инициализируется позже, поэтому здесь используем logging.error
 try:
     TARGET_TZ = pytz.timezone(TIMEZONE_STR)
 except pytz.UnknownTimeZoneError:
-    logging.error(f"Неизвестный часовой пояс '{TIMEZONE_STR}' в .env. Используется UTC.")
+    logging.error(f"Неизвестный часовой пояс '{TIMEZONE_STR}' в .env. Используется UTC.") # Используем logging вместо logger, т.к. logger еще не определен
     TARGET_TZ = pytz.utc
 
 def parse_hhmm(time_str: str, default_time: datetime.time) -> datetime.time:
@@ -110,7 +95,6 @@ def parse_hhmm(time_str: str, default_time: datetime.time) -> datetime.time:
         hour, minute = map(int, time_str.split(':'))
         return datetime.time(hour, minute)
     except (ValueError, TypeError):
-        # logger еще не определен, используем logging
         logging.error(f"Неверный формат времени '{time_str}' в .env. Используется {default_time.strftime('%H:%M')}.")
         return default_time
 
@@ -118,7 +102,7 @@ WORK_START_TIME = parse_hhmm(WORK_START_HHMM, datetime.time(9, 45))
 WORK_END_TIME = parse_hhmm(WORK_END_HHMM, datetime.time(19, 15))
 
 # Commands
-CMD_SPEAK = "speak"
+CMD_SPEAK = "speak" # Команда для снятия постоянного молчания
 
 # Logging Settings
 LOGS_DIR = "./logs/context_logs"
@@ -135,26 +119,34 @@ logger = logging.getLogger(__name__)
 # --- Validate Configuration ---
 required_vars = {
     "VK_GROUP_TOKEN": VK_GROUP_TOKEN,
-    "VK_GROUP_ID": VK_GROUP_ID, # Уже int
+    "VK_GROUP_ID": VK_GROUP_ID_STR,
     "OPENAI_API_KEY": OPENAI_API_KEY,
     "ASSISTANT_ID": ASSISTANT_ID,
     "FOLDER_ID": FOLDER_ID,
     "ADMIN_USER_ID": ADMIN_USER_ID
 }
-missing_vars_list = [name for name, value in required_vars.items() if not value and value !=0] # 0 может быть валидным ID для VK_GROUP_ID (хотя обычно нет)
-if missing_vars_list:
-    raise ValueError(f"❌ Ошибка: Не найдены переменные в .env: {', '.join(missing_vars_list)}")
+missing_vars = [name for name, value in required_vars.items() if not value]
+if missing_vars:
+    raise ValueError(f"❌ Ошибка: Не найдены переменные в .env: {', '.join(missing_vars)}")
+
+VK_GROUP_ID: Optional[int] = None
+if VK_GROUP_ID_STR:
+    try:
+        VK_GROUP_ID = int(VK_GROUP_ID_STR)
+    except ValueError:
+        raise ValueError("❌ Ошибка: VK_GROUP_ID в .env должен быть числом!")
 
 # --- Global State (In-Memory) ---
-user_threads: Dict[str, str] = {}
+user_threads: dict[str, str] = {}
 user_processing_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-user_last_message_time: Dict[int, datetime.datetime] = {}
-chat_silence_state: Dict[int, bool] = {}
-MY_PENDING_RANDOM_IDS: set = set()
+user_last_message_time: dict[int, datetime] = {}
+chat_silence_state: dict[int, bool] = {} # {peer_id: True if silent by CRM}
+MY_PENDING_RANDOM_IDS = set()
 
-pending_messages: Dict[int, List[str]] = {}
-user_message_timers: Dict[int, asyncio.Task] = {}
+pending_messages: dict[int, list[str]] = {}
+user_message_timers: dict[int, asyncio.Task] = {}
 
+# Файл для сохранения состояния постоянного молчания
 SILENCE_STATE_FILE = "silence_state.json"
 
 # --- Initialize API Clients ---
@@ -167,7 +159,7 @@ except Exception as e:
 
 try:
     vk_session_api = vk_api.VkApi(token=VK_GROUP_TOKEN, api_version=VK_API_VERSION)
-    logger.info("VK API сессия инициализирована (СИНХРОННО).")
+    logger.info("VK API сессия инициализирована (СИНХРОННО). Long Poll будет инициализирован в своем потоке.")
 except vk_api.AuthError as e:
      logger.critical(f"Ошибка авторизации VK: {e}. Проверьте токен группы.", exc_info=True)
      sys.exit(1)
@@ -175,9 +167,9 @@ except Exception as e:
     logger.critical(f"Ошибка инициализации VK API: {e}", exc_info=True)
     sys.exit(1)
 
-vector_collection: Optional[chromadb.api.models.Collection.Collection] = None
+vector_collection: Optional[chromadb.api.models.Collection.Collection] = None # Используем Optional
 
-def _get_active_db_subpath() -> Optional[str]:
+def _get_active_db_subpath() -> Optional[str]: # Используем Optional
     try:
         active_db_info_filepath = os.path.join(VECTOR_DB_BASE_PATH, ACTIVE_DB_INFO_FILE)
         if os.path.exists(active_db_info_filepath):
@@ -214,7 +206,7 @@ async def _initialize_active_vector_collection():
                 name=VECTOR_DB_COLLECTION_NAME,
             )
             logger.info(f"Успешно подключено к ChromaDB: '{active_db_full_path}'. Коллекция: '{VECTOR_DB_COLLECTION_NAME}'.")
-            if vector_collection:
+            if vector_collection: # Добавлена проверка
                 logger.info(f"Документов в активной коллекции при старте: {vector_collection.count()}")
         except Exception as e:
             logger.error(f"Ошибка инициализации ChromaDB для пути '{active_db_full_path}': {e}. Поиск по базе знаний будет недоступен.", exc_info=True)
@@ -245,10 +237,8 @@ drive_service = get_drive_service()
 def get_user_key(user_id: int) -> str:
     return str(user_id)
 
-# Функция is_non_working_hours (строка 237) - не вызывается в текущем коде.
-# Если она нужна, ее нужно будет вызвать. Пока оставляю, вдруг планируется.
 def is_non_working_hours() -> bool:
-    now_local = datetime.datetime.now(TARGET_TZ)
+    now_local = datetime.now(TARGET_TZ)
     current_time_local = now_local.time()
     is_non_working = current_time_local >= WORK_END_TIME or current_time_local < WORK_START_TIME
     return is_non_working
@@ -257,7 +247,6 @@ async def send_vk_message(peer_id: int, message: str):
     if not message:
         logger.warning(f"Попытка отправить пустое сообщение в peer_id={peer_id}")
         return
-    current_random_id = 0 # Инициализация для блока finally
     try:
         current_random_id = vk_api.utils.get_random_id()
         MY_PENDING_RANDOM_IDS.add(current_random_id)
@@ -274,17 +263,14 @@ async def send_vk_message(peer_id: int, message: str):
         )
     except vk_api.exceptions.ApiError as e:
         logger.error(f"Ошибка VK API при отправке сообщения в peer_id={peer_id}: {e}", exc_info=True)
-        # Исправление №2: Упрощение условия
         if current_random_id in MY_PENDING_RANDOM_IDS:
             MY_PENDING_RANDOM_IDS.remove(current_random_id)
             logger.debug(f"Удален random_id {current_random_id} из MY_PENDING_RANDOM_IDS из-за ошибки отправки для peer_id={peer_id}")
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при отправке сообщения в peer_id={peer_id}: {e}", exc_info=True)
-        # Исправление №2: Упрощение условия
         if current_random_id in MY_PENDING_RANDOM_IDS:
             MY_PENDING_RANDOM_IDS.remove(current_random_id)
             logger.debug(f"Удален random_id {current_random_id} из MY_PENDING_RANDOM_IDS из-за ошибки отправки для peer_id={peer_id}")
-
 
 async def set_typing_activity(peer_id: int):
      try:
@@ -297,9 +283,11 @@ async def set_typing_activity(peer_id: int):
          logger.warning(f"Не удалось установить статус 'typing' для peer_id={peer_id}: {e}")
 
 # --- Silence Mode Management (Permanent Only) ---
+
 async def save_silence_state_to_file():
+    """Сохраняет текущее состояние постоянных режимов молчания в JSON-файл."""
     logger.debug("Сохранение состояния постоянных режимов молчания в файл...")
-    data_to_save = {str(peer_id): True for peer_id, is_silent in chat_silence_state.items() if is_silent}
+    data_to_save = {str(peer_id): True for peer_id in chat_silence_state if chat_silence_state[peer_id]}
     try:
         def _save():
             with open(SILENCE_STATE_FILE, "w", encoding="utf-8") as f:
@@ -310,6 +298,7 @@ async def save_silence_state_to_file():
         logger.error(f"Ошибка при сохранении состояния режимов молчания: {e}", exc_info=True)
 
 async def load_silence_state_from_file():
+    """Загружает состояние постоянных режимов молчания из JSON-файла при старте бота."""
     global chat_silence_state
     logger.info("Загрузка состояния постоянных режимов молчания из файла...")
     try:
@@ -333,14 +322,15 @@ async def load_silence_state_from_file():
                     chat_silence_state[peer_id] = True
                     logger.info(f"Восстановлен постоянный режим молчания для peer_id={peer_id}")
                     restored_count += 1
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError) as e: # Добавлен KeyError
                 logger.error(f"Ошибка при обработке записи для peer_id_str='{peer_id_str}': {e}", exc_info=True)
         
         if restored_count > 0:
             logger.info(f"Успешно восстановлено {restored_count} состояний постоянного молчания.")
         else:
             logger.info("Активных состояний постоянного молчания для восстановления не найдено.")
-    except FileNotFoundError: # Обработка FileNotFoundError здесь, если _load() вернет None из-за отсутствия файла
+
+    except FileNotFoundError:
         logger.info(f"Файл {SILENCE_STATE_FILE} не найден. Запуск с чистым состоянием молчания.")
     except json.JSONDecodeError:
         logger.error(f"Ошибка декодирования JSON из файла {SILENCE_STATE_FILE}. Возможно, файл поврежден.")
@@ -348,20 +338,23 @@ async def load_silence_state_from_file():
         logger.error(f"Непредвиденная ошибка при загрузке состояния режимов молчания: {e}", exc_info=True)
 
 async def silence_user(peer_id: int):
+    """Активирует ПОСТОЯННЫЙ режим молчания для пользователя/чата (обычно из-за CRM)."""
     if chat_silence_state.get(peer_id):
         logger.info(f"Постоянный режим молчания для peer_id={peer_id} уже был активен.")
         return
+
     logger.info(f"Активация постоянного режима молчания для peer_id={peer_id}.")
     chat_silence_state[peer_id] = True
     await save_silence_state_to_file()
 
 async def unsilence_user(peer_id: int):
+    """Деактивирует ПОСТОЯННЫЙ режим молчания для пользователя/чата (командой 'speak')."""
     if peer_id in chat_silence_state:
         logger.info(f"Ручная деактивация (командой speak) режима молчания для peer_id={peer_id}.")
         chat_silence_state.pop(peer_id)
         await save_silence_state_to_file()
     else:
-         logger.debug(f"Попытка снять молчание для peer_id={peer_id}, но бот и так был активен.")
+         logger.debug(f"Попытка снять молчание для peer_id={peer_id}, но бот и так был активен (постоянное молчание не было установлено).")
 
 # --- Функции буферизации сообщений ---
 async def schedule_buffered_processing(peer_id: int, original_user_id: int):
@@ -420,7 +413,7 @@ async def process_buffered_messages(peer_id: int, original_user_id: int):
             logger.debug(f"{log_prefix} Блокировка для peer_id={peer_id} освобождена.")
 
 # --- OpenAI Assistant Interaction ---
-async def get_or_create_thread(user_id: int) -> Optional[str]:
+async def get_or_create_thread(user_id: int) -> Optional[str]: # Используем Optional
     user_key = get_user_key(user_id)
     if user_key in user_threads:
         thread_id = user_threads[user_key]
@@ -430,10 +423,11 @@ async def get_or_create_thread(user_id: int) -> Optional[str]:
             return thread_id
         except openai.NotFoundError:
             logger.warning(f"Тред {thread_id} не найден в OpenAI для user_id={user_id}. Создаем новый.")
-            if user_key in user_threads: del user_threads[user_key]
+            del user_threads[user_key] # Удаляем невалидный ID
         except Exception as e:
             logger.error(f"Ошибка доступа к треду {thread_id} для user_id={user_id}: {e}. Создаем новый.")
-            if user_key in user_threads: del user_threads[user_key]
+            if user_key in user_threads: # Проверка перед удалением
+                 del user_threads[user_key]
     try:
         logger.info(f"Создаем новый тред для user_id={user_id}...")
         thread = await openai_client.beta.threads.create()
@@ -453,8 +447,6 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
         context = ""
         if vector_collection:
              context = await get_relevant_context(message_text, k=RELEVANT_CONTEXT_COUNT)
-             # Исправление №3: Убрать первый вызов log_context
-             # await log_context(user_id, message_text, context)
         full_prompt = message_text
         if context:
             full_prompt = f"Используй следующую информацию из базы знаний для ответа:\n--- НАЧАЛО КОНТЕКСТА ---\n{context}\n--- КОНЕЦ КОНТЕКСТА ---\n\nВопрос пользователя: {message_text}"
@@ -511,26 +503,24 @@ async def chat_with_assistant(user_id: int, message_text: str) -> str:
         messages_response = await openai_client.beta.threads.messages.list(
             thread_id=thread_id, order="desc", limit=5
         )
-        assistant_response_content = None
+        assistant_response = None
         for msg in messages_response.data:
             if msg.role == "assistant" and msg.run_id == run.id:
                 if msg.content and msg.content[0].type == 'text':
-                    assistant_response_content = msg.content[0].text.value
-                    logger.info(f"Получен ответ от ассистента для user_id={user_id}: {assistant_response_content[:100]}...")
+                    assistant_response = msg.content[0].text.value
+                    logger.info(f"Получен ответ от ассистента для user_id={user_id}: {assistant_response[:100]}...")
                     break
-        if assistant_response_content:
-            # Исправление №3: log_context вызывается один раз здесь
-            await log_context(user_id, message_text, context, assistant_response_content)
-            return assistant_response_content
+        if assistant_response:
+            await log_context(user_id, message_text, context, assistant_response)
+            return assistant_response
         else:
             logger.warning(f"Не найдено текстового ответа от ассистента в треде {thread_id} после run {run.id}. Ответы: {messages_response.data}")
-            # Исправление №4: Не возвращать ответ от другого run
-            # for msg in messages_response.data:
-            #      if msg.role == "assistant":
-            #           if msg.content and msg.content[0].type == 'text':
-            #                logger.warning(f"Найден ответ ассистента, но от другого run ({msg.run_id}) - НЕ используем его.")
-            #                # return msg.content[0].text.value # УДАЛЕНО
-            return "К сожалению, не удалось получить ответ от ассистента в этот раз. Попробуйте позже."
+            for msg in messages_response.data:
+                 if msg.role == "assistant":
+                      if msg.content and msg.content[0].type == 'text':
+                           logger.warning(f"Найден ответ ассистента, но от другого run ({msg.run_id}) - используем его.")
+                           return msg.content[0].text.value
+            return "Произошла внутренняя ошибка (ответ ассистента не найден)."
     except openai.APIError as e:
          logger.error(f"OpenAI API ошибка для user_id={user_id}: {e}", exc_info=True)
          return "Произошла внутренняя ошибка (API OpenAI)."
@@ -569,29 +559,16 @@ async def get_relevant_context(query: str, k: int) -> str:
         if not results or not results.get("ids") or not results["ids"][0]:
             logger.info(f"Релевантных документов не найдено для запроса: '{query[:50]}...'")
             return ""
-        
-        # Убедимся, что results["documents"] и другие списки существуют и не пусты
-        # Хотя проверка results["ids"][0] уже это частично покрывает
-        if not results.get("documents") or not results["documents"][0]: # type: ignore
-            logger.info(f"В результатах ChromaDB отсутствуют документы для запроса: '{query[:50]}...'")
-            return ""
-
-        documents = results["documents"][0] # type: ignore
-        metadatas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(documents) # type: ignore
-        # distances = results["distances"][0] if results.get("distances") and results["distances"][0] else [0.0] * len(documents) # type: ignore
-
+        documents = results["documents"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
         context_pieces = []
         logger.info(f"Найдено {len(documents)} док-в для '{query[:50]}...'. Топ {k}:")
-        for i, doc_content in enumerate(documents): # Используем enumerate(documents)
-            meta = metadatas[i] if i < len(metadatas) else {}
-            # dist = distances[i] if i < len(distances) else 0.0 # Дистанция используется только для логирования
-            
+        for i, (doc, meta, dist) in enumerate(zip(documents, metadatas, distances)):
             source = meta.get('source', 'Неизвестный источник')
-            # logger.info(f"  #{i+1}: Источник='{source}', Дистанция={dist:.4f}, Контент='{doc_content[:100]}...'")
-            logger.info(f"  #{i+1}: Источник='{source}', Контент='{doc_content[:100]}...'")
-            context_piece = f"Из документа '{source}':\n{doc_content}"
+            logger.info(f"  #{i+1}: Источник='{source}', Дистанция={dist:.4f}, Контент='{doc[:100]}...'")
+            context_piece = f"Из документа '{source}':\n{doc}"
             context_pieces.append(context_piece)
-
         if not context_pieces:
              logger.info(f"Не найдено подходящих фрагментов контекста для '{query[:50]}...'.")
              return ""
@@ -609,7 +586,7 @@ async def update_vector_store():
     if not drive_service:
         logger.error("Обновление БЗ невозможно: сервис Google Drive не инициализирован.")
         return {"success": False, "error": "Сервис Google Drive не инициализирован", "added_chunks": 0, "total_chunks": 0}
-    timestamp_dir_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_new"
+    timestamp_dir_name = datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_new"
     new_db_path = os.path.join(VECTOR_DB_BASE_PATH, timestamp_dir_name)
     logger.info(f"Создание новой временной директории для БД: {new_db_path}")
     try:
@@ -617,8 +594,7 @@ async def update_vector_store():
     except Exception as e_mkdir:
         logger.error(f"Не удалось создать временную директорию '{new_db_path}': {e_mkdir}.", exc_info=True)
         return {"success": False, "error": f"Failed to create temp dir: {e_mkdir}", "added_chunks": 0, "total_chunks": 0}
-    
-    temp_vector_collection: Optional[chromadb.api.models.Collection.Collection] = None
+    temp_vector_collection = None
     try:
         temp_chroma_client = chromadb.PersistentClient(path=new_db_path)
         temp_vector_collection = temp_chroma_client.get_or_create_collection(name=VECTOR_DB_COLLECTION_NAME)
@@ -630,18 +606,16 @@ async def update_vector_store():
             if os.path.exists(new_db_path): shutil.rmtree(new_db_path)
             return {"success": False, "error": "No documents in Google Drive", "added_chunks": 0, "total_chunks": 0}
         logger.info(f"Получено {len(documents_data)} документов из Google Drive.")
-        all_texts: List[str] = []
-        all_metadatas: List[Dict[str, Any]] = []
+        all_texts, all_metadatas = [], []
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")]) # Пример
+        markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")])
         MD_SECTION_MAX_LEN = 2000
         for doc_info in documents_data:
-            doc_name, doc_content_str = doc_info['name'], doc_info['content']
-            if not doc_content_str or not doc_content_str.strip():
+            doc_name, doc_content = doc_info['name'], doc_info['content']
+            if not doc_content or not doc_content.strip():
                 logger.warning(f"Документ '{doc_name}' пуст. Пропускаем.")
                 continue
-            # Исправление №5: Правильное экранирование
-            enhanced_doc_content = f"Документ: {doc_name}\n\n{doc_content_str}"
+            enhanced_doc_content = f"Документ: {doc_name}\n\n{doc_content}"
             chunk_idx = 0
             is_md = doc_name.lower().endswith(('.md', '.markdown'))
             try:
@@ -668,15 +642,16 @@ async def update_vector_store():
                 logger.info(f"Документ '{doc_name}' разбит на {chunk_idx} чанков.")
             except Exception as e_split:
                 logger.error(f"Ошибка при разбиении '{doc_name}': {e_split}", exc_info=True)
-                if is_md: # Fallback for markdown
+                # Fallback to simple text splitting if markdown fails
+                if is_md:
                     try:
                         chunks = text_splitter.split_text(enhanced_doc_content)
-                        chunk_idx_fb = 0 # Новый счетчик для fallback
+                        chunk_idx = 0
                         for chunk_text in chunks:
                             all_texts.append(chunk_text)
-                            all_metadatas.append({"source": doc_name, "type": "text_fallback", "chunk": chunk_idx_fb})
-                            chunk_idx_fb += 1
-                        logger.info(f"Документ '{doc_name}' (fallback) разбит на {chunk_idx_fb} чанков.")
+                            all_metadatas.append({"source": doc_name, "type": "text_fallback", "chunk": chunk_idx})
+                            chunk_idx += 1
+                        logger.info(f"Документ '{doc_name}' (fallback) разбит на {chunk_idx} чанков.")
                     except Exception as e_fallback:
                          logger.error(f"Ошибка fallback-разбиения '{doc_name}': {e_fallback}", exc_info=True)
                 continue
@@ -686,39 +661,30 @@ async def update_vector_store():
             return {"success": False, "error": "No text data to add", "added_chunks": 0, "total_chunks": 0}
         logger.info(f"Добавление {len(all_texts)} чанков во временную коллекцию...")
         try:
-            all_ids = [f"{meta['source']}_{meta.get('type','unknown')}_{meta['chunk']}_{random.randint(1000,9999)}" for meta in all_metadatas]
+            all_ids = [f"{meta['source']}_{meta['chunk']}_{random.randint(1000,9999)}" for meta in all_metadatas] # Ensure unique IDs
             logger.info(f"Создание эмбеддингов для {len(all_texts)} чанков...")
             embeddings_response = await openai_client.embeddings.create(
                 input=all_texts, model=EMBEDDING_MODEL,
                 dimensions=EMBEDDING_DIMENSIONS if EMBEDDING_DIMENSIONS else None
             )
             all_embeddings = [item.embedding for item in embeddings_response.data]
-            if temp_vector_collection: # Проверка что коллекция существует
-                await asyncio.to_thread(
-                   temp_vector_collection.add,
-                   ids=all_ids, embeddings=all_embeddings, metadatas=all_metadatas, documents=all_texts
-                )
-                final_added, final_total = len(all_ids), temp_vector_collection.count()
-                logger.info(f"Успешно добавлено {final_added} чанков. Всего: {final_total}.")
-            else: # Это не должно произойти если код выше корректен
-                logger.error("temp_vector_collection не была инициализирована!")
-                return {"success": False, "error": "temp_vector_collection is None", "added_chunks": 0, "total_chunks": 0}
-
+            await asyncio.to_thread(
+               temp_vector_collection.add, # type: ignore
+               ids=all_ids, embeddings=all_embeddings, metadatas=all_metadatas, documents=all_texts
+            )
+            final_added, final_total = len(all_ids), temp_vector_collection.count() # type: ignore
+            logger.info(f"Успешно добавлено {final_added} чанков. Всего: {final_total}.")
             active_db_info_filepath = os.path.join(VECTOR_DB_BASE_PATH, ACTIVE_DB_INFO_FILE)
             with open(active_db_info_filepath, "w", encoding="utf-8") as f: f.write(timestamp_dir_name)
             logger.info(f"Путь к новой активной базе '{timestamp_dir_name}' сохранен.")
-            await _initialize_active_vector_collection() # Перезагружаем глобальную коллекцию
-            if not vector_collection: # Проверяем успешность перезагрузки
-                 logger.error("Критическая ошибка: не удалось перезагрузить vector_collection на новую активную базу!")
+            await _initialize_active_vector_collection()
+            if not vector_collection:
                  return {"success": False, "error": "Failed to reload global vector_collection", "added_chunks": final_added, "total_chunks": final_total}
             if previous_active_subpath and previous_active_subpath != timestamp_dir_name:
                 prev_path = os.path.join(VECTOR_DB_BASE_PATH, previous_active_subpath)
                 if os.path.exists(prev_path):
-                    try:
-                        shutil.rmtree(prev_path)
-                        logger.info(f"Удалена предыдущая активная директория БД: '{prev_path}'")
-                    except Exception as e_rm_old:
-                        logger.error(f"Не удалось удалить предыдущую БД '{prev_path}': {e_rm_old}", exc_info=True)
+                    shutil.rmtree(prev_path)
+                    logger.info(f"Удалена предыдущая БД: '{prev_path}'")
             logger.info("--- Обновление базы знаний успешно завершено ---")
             return {"success": True, "added_chunks": final_added, "total_chunks": final_total, "new_active_path": timestamp_dir_name}
         except openai.APIError as e_openai:
@@ -735,26 +701,11 @@ async def update_vector_store():
         return {"success": False, "error": f"Critical update error: {e_main_update}", "added_chunks": 0, "total_chunks": 0}
 
 # --- Google Drive Reading ---
-# Исправление №6: Циклическая загрузка файлов
-def _download_file_content(service, file_id, export_mime_type=None):
-    if export_mime_type:
-        request = service.files().export_media(fileId=file_id, mimeType=export_mime_type)
-    else:
-        request = service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while done is False:
-        status, done = downloader.next_chunk()
-        if status: logger.debug(f"Загрузка файла {file_id}: {int(status.progress() * 100)}%.")
-    fh.seek(0)
-    return fh
-
-def read_data_from_drive() -> List[Dict[str,str]]:
+def read_data_from_drive() -> list[dict]:
     if not drive_service:
         logger.error("Чтение из Google Drive невозможно: сервис не инициализирован.")
         return []
-    result_docs: List[Dict[str,str]] = []
+    result_docs = []
     try:
         files_response = drive_service.files().list(
             q=f"'{FOLDER_ID}' in parents and trashed=false",
@@ -763,21 +714,21 @@ def read_data_from_drive() -> List[Dict[str,str]]:
         files = files_response.get('files', [])
         logger.info(f"Найдено {len(files)} файлов в папке Google Drive.")
         downloader_map = {
-            'application/vnd.google-apps.document': lambda s, f_id: download_google_doc(s, f_id),
-            'application/pdf': lambda s, f_id: download_pdf(s, f_id),
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': lambda s, f_id: download_docx(s, f_id),
-            'text/plain': lambda s, f_id: download_text(s, f_id),
-            'text/markdown': lambda s, f_id: download_text(s, f_id), # .md как text
+            'application/vnd.google-apps.document': download_google_doc,
+            'application/pdf': download_pdf,
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': download_docx,
+            'text/plain': download_text,
+            'text/markdown': download_text, # Treat .md as plain text for download
         }
-        for file_item in files:
+        for file_item in files: # Renamed to file_item to avoid conflict
             file_id, mime_type, file_name = file_item['id'], file_item['mimeType'], file_item['name']
             if mime_type in downloader_map:
                 logger.info(f"Обработка файла: '{file_name}' (ID: {file_id}, Type: {mime_type})")
                 try:
-                    content_str = downloader_map[mime_type](drive_service, file_id)
-                    if content_str and content_str.strip():
-                        result_docs.append({'name': file_name, 'content': content_str})
-                        logger.info(f"Успешно прочитан файл: '{file_name}' ({len(content_str)} симв)")
+                    content = downloader_map[mime_type](drive_service, file_id)
+                    if content and content.strip():
+                        result_docs.append({'name': file_name, 'content': content})
+                        logger.info(f"Успешно прочитан файл: '{file_name}' ({len(content)} симв)")
                     else:
                         logger.warning(f"Файл '{file_name}' пуст или не удалось извлечь контент.")
                 except Exception as e_read_file:
@@ -790,12 +741,25 @@ def read_data_from_drive() -> List[Dict[str,str]]:
     logger.info(f"Чтение из Google Drive завершено. Прочитано {len(result_docs)} документов.")
     return result_docs
 
-def download_google_doc(service, file_id) -> str:
-    fh = _download_file_content(service, file_id, export_mime_type='text/plain')
+def download_google_doc(service, file_id):
+    request = service.files().export_media(fileId=file_id, mimeType='text/plain')
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        logger.debug(f"Google Doc Downloader: file_id={file_id}, status={status.progress() if status else 'N/A'}")
     return fh.getvalue().decode('utf-8', errors='ignore')
 
-def download_pdf(service, file_id) -> str:
-    fh = _download_file_content(service, file_id)
+def download_pdf(service, file_id):
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        logger.debug(f"PDF Downloader: file_id={file_id}, status={status.progress() if status else 'N/A'}")
+    fh.seek(0)
     try:
         pdf_reader = PyPDF2.PdfReader(fh)
         return "".join(page.extract_text() + "\n" for page in pdf_reader.pages if page.extract_text())
@@ -803,8 +767,15 @@ def download_pdf(service, file_id) -> str:
          logger.error(f"Ошибка обработки PDF (ID: {file_id}): {e}", exc_info=True)
          return ""
 
-def download_docx(service, file_id) -> str:
-    fh = _download_file_content(service, file_id)
+def download_docx(service, file_id):
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        logger.debug(f"DOCX Downloader: file_id={file_id}, status={status.progress() if status else 'N/A'}")
+    fh.seek(0)
     try:
         doc = docx.Document(fh)
         return "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text)
@@ -812,8 +783,14 @@ def download_docx(service, file_id) -> str:
          logger.error(f"Ошибка обработки DOCX (ID: {file_id}): {e}", exc_info=True)
          return ""
 
-def download_text(service, file_id) -> str:
-    fh = _download_file_content(service, file_id)
+def download_text(service, file_id): # Handles both text/plain and text/markdown
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        logger.debug(f"Text Downloader: file_id={file_id}, status={status.progress() if status else 'N/A'}")
     try:
         return fh.getvalue().decode('utf-8')
     except UnicodeDecodeError:
@@ -824,9 +801,9 @@ def download_text(service, file_id) -> str:
               return ""
 
 # --- History and Context Management ---
-async def log_context(user_id: int, message_text: str, context: str, response_text: Optional[str]=None):
+async def log_context(user_id, message_text, context, response_text=None):
     try:
-        ts = datetime.datetime.now()
+        ts = datetime.now()
         log_filename = os.path.join(LOGS_DIR, f"context_{user_id}_{ts.strftime('%Y%m%d_%H%M%S')}.log")
         with open(log_filename, "w", encoding="utf-8") as f:
             f.write(f"Timestamp: {ts.isoformat()}\nUser ID: {user_id}\n"
@@ -837,7 +814,6 @@ async def log_context(user_id: int, message_text: str, context: str, response_te
         logger.error(f"Ошибка при логировании контекста для user_id={user_id}: {e}", exc_info=True)
 
 async def cleanup_old_context_logs():
-    # Исправление №7: logger используется корректно
     logger.info("Запуск очистки старых логов контекста...")
     count = 0
     try:
@@ -847,14 +823,8 @@ async def cleanup_old_context_logs():
                 if os.path.getmtime(filename) < cutoff:
                     os.remove(filename)
                     count += 1
-            except FileNotFoundError: # Файл мог быть удален другим процессом
-                continue
-            except Exception as e_remove_log:
-                logger.error(f"Ошибка при удалении файла лога {filename}: {e_remove_log}")
-        if count > 0:
-            logger.info(f"Очистка логов: удалено {count} устаревших файлов.")
-        else:
-            logger.info("Очистка логов: устаревших файлов не найдено.")
+            except Exception: continue
+        logger.info(f"Очистка логов: удалено {count} устаревших файлов." if count else "Устаревших логов не найдено.")
     except Exception as e:
         logger.error(f"Критическая ошибка при очистке логов контекста: {e}", exc_info=True)
 
@@ -864,10 +834,10 @@ last_auto_update_date: Optional[datetime.date] = None
 async def background_cleanup_task():
     global last_auto_update_date
     while True:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3600) # Каждый час
         logger.info("Запуск периодической фоновой задачи...")
         try:
-            now_local = datetime.datetime.now(TARGET_TZ)
+            now_local = datetime.now(TARGET_TZ)
             if now_local.hour == 4 and (last_auto_update_date is None or last_auto_update_date < now_local.date()):
                 logger.info(f"Время для ежедневного обновления БЗ ({now_local.hour}:00). Запускаем...")
                 await run_update_and_notify_admin(ADMIN_USER_ID)
@@ -879,12 +849,12 @@ async def background_cleanup_task():
 
 # --- Main Event Handler ---
 async def handle_new_message(event: VkBotEvent):
-    # global user_threads # user_threads и так глобальная
+    global user_threads
     try:
-        if event.object.message and event.object.message.get('from_id') and event.object.message.get('from_id') > 0 : # Сообщение от пользователя
-            user_id = event.object.message['from_id']
-            peer_id = event.object.message['peer_id']
-            message_text = event.object.message.get('text', '').strip() # get с default
+        if event.from_user:
+            user_id = event.obj.message['from_id']
+            peer_id = event.obj.message['peer_id']
+            message_text = event.obj.message['text'].strip()
             if not message_text:
                  logger.info(f"Пустое сообщение от user_id={user_id}. Игнорируем.")
                  return
@@ -898,21 +868,21 @@ async def handle_new_message(event: VkBotEvent):
             if message_text.lower() == "/reset":
                 user_key = get_user_key(user_id)
                 log_prefix = f"handle_new_message(reset for peer:{peer_id}, user:{user_id}):"
-                logger.info(f"{log_prefix} Получена команда сброса диалога.") # logger вместо logging
+                logger.info(f"{log_prefix} Получена команда сброса диалога.")
                 if peer_id in pending_messages: del pending_messages[peer_id]
                 if peer_id in user_message_timers:
                     old_timer = user_message_timers.pop(peer_id)
                     if not old_timer.done(): old_timer.cancel()
                 thread_id_to_forget = user_threads.pop(user_key, None)
-                if thread_id_to_forget: logger.info(f"{log_prefix} Тред {thread_id_to_forget} удален из памяти.") # logger вместо logging
+                if thread_id_to_forget: logger.info(f"{log_prefix} Тред {thread_id_to_forget} удален из памяти.")
                 await send_vk_message(peer_id, "🔄 Диалог сброшен.")
                 return
             
             if message_text.lower() == "/reset_all" and user_id == ADMIN_USER_ID:
                 log_prefix = f"handle_new_message(reset_all from user:{user_id}):"
-                logger.info(f"{log_prefix} Получена команда сброса ВСЕХ диалогов.") # logger вместо logging
+                logger.info(f"{log_prefix} Получена команда сброса ВСЕХ диалогов.")
                 active_timer_count = sum(1 for task in user_message_timers.values() if not task.done())
-                for task in list(user_message_timers.values()): # Итерируемся по копии
+                for task in user_message_timers.values():
                     if not task.done(): task.cancel()
                 user_message_timers.clear()
                 pending_count = len(pending_messages)
@@ -925,18 +895,18 @@ async def handle_new_message(event: VkBotEvent):
             is_manager = user_id in MANAGER_USER_IDS or user_id == ADMIN_USER_ID
             if is_manager:
                 command = message_text.lower()
-                if command == CMD_SPEAK.lower():
-                    await unsilence_user(peer_id)
+                if command == CMD_SPEAK.lower(): # Только команда speak
+                    await unsilence_user(peer_id) # Снимаем постоянное молчание
                     await send_vk_message(peer_id, "🤖 Режим молчания снят. Бот снова активен.")
                     return
 
-            if chat_silence_state.get(peer_id, False):
+            if chat_silence_state.get(peer_id, False): # Проверка на постоянное молчание
                 logger.info(f"Бот в режиме молчания для peer_id={peer_id} (CRM). Сообщение от user_id={user_id} игнорируется.")
                 return
 
-            now_dt = datetime.datetime.now()
+            now_dt = datetime.now()
             last_time = user_last_message_time.get(user_id)
-            if last_time and now_dt - last_time < datetime.timedelta(seconds=MESSAGE_COOLDOWN_SECONDS):
+            if last_time and now_dt - last_time < timedelta(seconds=MESSAGE_COOLDOWN_SECONDS):
                 logger.warning(f"Кулдаун для user_id={user_id}. Игнорируем.")
                 return
             user_last_message_time[user_id] = now_dt
@@ -953,12 +923,15 @@ async def handle_new_message(event: VkBotEvent):
             new_timer_task = asyncio.create_task(schedule_buffered_processing(peer_id, user_id))
             user_message_timers[peer_id] = new_timer_task
         
-        # elif event.from_chat: # Убрано, так как from_user/from_chat теперь через event.object.message.from_id
-        #     # Логика для чатов, если from_id < 0 (от сообщества) или если это чат (peer_id > 2_000_000_000)
-        #     pass
+        elif event.from_chat:
+            chat_id = event.chat_id # type: ignore
+            user_id = event.obj.message['from_id']
+            message_text = event.obj.message['text'].strip()
+            logger.debug(f"Сообщение в чате {chat_id} от {user_id}: {message_text[:50]}")
+            # Логика для групповых чатов не реализована для ответа бота
+            pass
         else:
-            logger.debug(f"Получено событие Long Poll типа {event.type}, не MESSAGE_NEW от пользователя, или нет from_id. Пропускается.")
-
+            logger.debug(f"Получено событие Long Poll типа {event.type}, не обрабатывается.")
     except Exception as e:
         logger.error(f"Критическая ошибка в handle_new_message: {e}", exc_info=True)
 
@@ -966,7 +939,7 @@ async def handle_new_message(event: VkBotEvent):
 async def run_update_and_notify_admin(notification_peer_id: int):
     logger.info(f"run_update_and_notify_admin: Запуск обновления БЗ для peer_id={notification_peer_id}")
     update_result = await update_vector_store()
-    current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     admin_message = f"🔔 Отчет об обновлении БЗ ({current_time_str}):\n"
     if update_result.get("success"):
         admin_message += (f"✅ Успешно!\n➕ Добавлено: {update_result.get('added_chunks', 'N/A')}\n"
@@ -977,57 +950,47 @@ async def run_update_and_notify_admin(notification_peer_id: int):
     logger.info(f"Результат обновления БЗ: {admin_message}")
     try:
         await send_vk_message(notification_peer_id, admin_message)
-        # Исправление №8: Упрощение условия
-        if ADMIN_USER_ID > 0 and notification_peer_id != ADMIN_USER_ID:
+        if ADMIN_USER_ID != 0 and notification_peer_id != ADMIN_USER_ID:
             await send_vk_message(ADMIN_USER_ID, "[Авто] " + admin_message)
     except Exception as e_notify:
         logger.error(f"Не удалось отправить уведомление админу: {e_notify}", exc_info=True)
 
 async def main():
     logger.info("--- Запуск VK бота ---")
-    
-    # Исправление №11: Инициализация переменных
-    cleanup_task: Optional[asyncio.Task] = None
-    listen_task: Optional[asyncio.Task] = None
-
-    await load_silence_state_from_file()
+    await load_silence_state_from_file() # Загружаем состояние молчания
     await _initialize_active_vector_collection()
     logger.info("Запуск фонового обновления БЗ при старте...")
     asyncio.create_task(run_update_and_notify_admin(ADMIN_USER_ID))
     cleanup_task = asyncio.create_task(background_cleanup_task())
     logger.info("Фоновая задача очистки запущена.")
     logger.warning("Используется СИНХРОННЫЙ VkBotLongPoll. Это БЛОКИРУЕТ асинхронный цикл.")
-    
+    listen_task = None
     try:
         loop = asyncio.get_running_loop()
         listen_task = asyncio.create_task(asyncio.to_thread(run_longpoll_sync, loop), name="VKLongPollListener")
-        if listen_task: await listen_task # Ждем завершения задачи
+        if listen_task: await listen_task
     except vk_api.exceptions.ApiError as e:
         logger.critical(f"Критическая ошибка VK API в Long Poll: {e}", exc_info=True)
     except Exception as e:
          logger.critical(f"Критическая ошибка в главном цикле: {e}", exc_info=True)
     finally:
         logger.info("Завершение работы фоновых задач...")
-        if cleanup_task and not cleanup_task.done():
-            cleanup_task.cancel()
+        if 'cleanup_task' in locals() and cleanup_task: cleanup_task.cancel() # type: ignore
         if listen_task and not listen_task.done():
              listen_task.cancel()
              logger.warning("Запрошена отмена задачи Long Poll.")
-        
-        tasks_to_gather = []
-        if cleanup_task: tasks_to_gather.append(cleanup_task)
-        if listen_task: tasks_to_gather.append(listen_task)
-        
-        if tasks_to_gather:
-            await asyncio.gather(*tasks_to_gather, return_exceptions=True)
-        
+        await asyncio.gather(
+            cleanup_task if 'cleanup_task' in locals() and cleanup_task else asyncio.sleep(0), # type: ignore
+            listen_task if listen_task else asyncio.sleep(0),
+            return_exceptions=True
+        )
         logger.info("--- Бот остановлен ---")
 
 def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
     logger.info("Запуск синхронного Long Poll в отдельном потоке...")
     MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAY_SECONDS = 5, 30
     current_attempts = 0
-    # global vk_session_api, VK_GROUP_ID # Они и так доступны как глобальные
+    global vk_session_api, VK_GROUP_ID # Убедимся, что они доступны
     
     while True:
         try:
@@ -1037,8 +1000,7 @@ def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
                 continue
 
             logger.info(f"[Thread LongPoll] Инициализация VkBotLongPoll (попытка {current_attempts + 1}).")
-            # VK_GROUP_ID уже int
-            current_longpoll = VkBotLongPoll(vk_session_api, VK_GROUP_ID)
+            current_longpoll = VkBotLongPoll(vk_session_api, VK_GROUP_ID) # type: ignore
             logger.info("[Thread LongPoll] VkBotLongPoll инициализирован.")
             current_attempts = 0
             logger.info("[Thread LongPoll] Начало прослушивания событий...")
@@ -1046,53 +1008,53 @@ def run_longpoll_sync(async_loop: asyncio.AbstractEventLoop):
                 if event.type == VkBotEventType.MESSAGE_NEW:
                     asyncio.run_coroutine_threadsafe(handle_new_message(event), async_loop)
                 elif event.type == VkBotEventType.MESSAGE_REPLY:
-                    logger.debug(f"Получено MESSAGE_REPLY: {event.object}") # event.object вместо event.obj
+                    logger.debug(f"Получено MESSAGE_REPLY: {event.obj}")
                     try:
-                        # VK_GROUP_ID уже int
-                        is_outgoing_from_group = (event.object.get('out') == 1 and 
-                                                  event.object.get('from_id') == -VK_GROUP_ID)
+                        # Проверяем, что сообщение от нашей группы (исходящее)
+                        # и from_id это ID нашей группы (отрицательный)
+                        is_outgoing_from_group = (event.obj.get('out') == 1 and 
+                                                  event.obj.get('from_id') == -VK_GROUP_ID) # VK_GROUP_ID уже int
                         
                         if is_outgoing_from_group:
-                            event_random_id = event.object.get('random_id')
-                            peer_id = event.object.get('peer_id')
+                            event_random_id = event.obj.get('random_id')
+                            peer_id = event.obj.get('peer_id')
 
                             if event_random_id is not None and event_random_id in MY_PENDING_RANDOM_IDS:
                                 MY_PENDING_RANDOM_IDS.remove(event_random_id)
-                                logger.debug(f"MESSAGE_REPLY от бота (random_id: {event_random_id}) для peer_id={peer_id}. Удален.")
+                                logger.debug(f"MESSAGE_REPLY от бота (random_id: {event_random_id}) для peer_id={peer_id}. Удален из MY_PENDING_RANDOM_IDS.")
                             else:
-                                crm_message_text = event.object.get('text', '') 
+                                crm_message_text = event.obj.get('text', '') 
                                 logger.info(f"MESSAGE_REPLY от CRM/оператора (текст: '{crm_message_text[:50]}...', random_id: {event_random_id}) для peer_id={peer_id}. Активируем ПОСТОЯННЫЙ режим молчания.")
                                 if peer_id:
+                                    # Активируем постоянное молчание
                                     asyncio.run_coroutine_threadsafe(silence_user(peer_id), async_loop)
                                 else:
-                                    logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для CRM: {event.object}")
+                                    logger.warning(f"Не удалось определить peer_id из MESSAGE_REPLY для CRM: {event.obj}")
                         else:
-                             logger.debug(f"Пропускаем MESSAGE_REPLY (не от нашей группы или не исходящее): {event.object}")
+                             logger.debug(f"Пропускаем MESSAGE_REPLY (не от нашей группы или не исходящее): {event.obj}")
                     except Exception as e_reply_proc:
                         logger.error(f"Ошибка при обработке MESSAGE_REPLY: {e_reply_proc}", exc_info=True)
-                        logger.debug(f"Ошибочный MESSAGE_REPLY: {event.object}")
+                        logger.debug(f"Ошибочный MESSAGE_REPLY: {event.obj}")
                 else:
                     logger.debug(f"Пропускаем событие типа {event.type}")
             logger.warning("[Thread LongPoll] Цикл listen() завершился. Перезапуск...")
             current_attempts = 0
             time_module.sleep(RECONNECT_DELAY_SECONDS)
-        except (requests.exceptions.RequestException, vk_api.exceptions.VkApiError) as e_net:
+        except (requests.exceptions.RequestException, vk_api.exceptions.VkApiError) as e_net: # Более общие сетевые ошибки
             logger.error(f"[Thread LongPoll] Ошибка сети/VK API: {e_net}", exc_info=True)
             current_attempts += 1
             if MAX_RECONNECT_ATTEMPTS > 0 and current_attempts >= MAX_RECONNECT_ATTEMPTS:
                 logger.critical(f"[Thread LongPoll] Превышено макс. попыток переподключения. Остановка.")
-                if ADMIN_USER_ID > 0: # Отправляем админу только если ID валидный
-                    asyncio.run_coroutine_threadsafe(send_vk_message(ADMIN_USER_ID, "Критическая ошибка: VK Long Poll остановлен."), async_loop)
+                asyncio.run_coroutine_threadsafe(send_vk_message(ADMIN_USER_ID, "Критическая ошибка: VK Long Poll остановлен."), async_loop) # type: ignore
                 break
             logger.info(f"[Thread LongPoll] Пауза {RECONNECT_DELAY_SECONDS}с перед попыткой {current_attempts + 1}...")
             time_module.sleep(RECONNECT_DELAY_SECONDS)
         except Exception as e_fatal:
             logger.critical(f"[Thread LongPoll] Непредвиденная критическая ошибка: {e_fatal}", exc_info=True)
-            current_attempts += 1
+            current_attempts += 1 # Считаем попытку
             if MAX_RECONNECT_ATTEMPTS > 0 and current_attempts >= MAX_RECONNECT_ATTEMPTS:
                  logger.critical(f"[Thread LongPoll] Превышено макс. попыток после непредвиденной ошибки. Остановка.")
-                 if ADMIN_USER_ID > 0:
-                     asyncio.run_coroutine_threadsafe(send_vk_message(ADMIN_USER_ID, "Критическая ошибка: VK Long Poll остановлен (непредвиденная ошибка)."), async_loop)
+                 asyncio.run_coroutine_threadsafe(send_vk_message(ADMIN_USER_ID, "Критическая ошибка: VK Long Poll остановлен (непредвиденная ошибка)."), async_loop) # type: ignore
                  break
             logger.info(f"[Thread LongPoll] Пауза {RECONNECT_DELAY_SECONDS * 2}с перед попыткой {current_attempts + 1}...")
             time_module.sleep(RECONNECT_DELAY_SECONDS * 2)

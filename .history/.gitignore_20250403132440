@@ -22,7 +22,6 @@ logs/context_logs/*
 # Локальная база данных векторов
 local_vector_db/*
 !local_vector_db/.gitkeep
-silence_state.json
 
 # Редакторы и IDE
 .vscode/
