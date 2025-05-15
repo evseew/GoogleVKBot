@@ -796,7 +796,8 @@ async def update_vector_store():
             enhanced_doc_content = f"Документ: {doc_name}\\n\\n{doc_content}"
             chunk_index_in_doc = 0
             
-            is_markdown = doc_name.lower().endswith('.md') # Упрощаем как в TG-боте
+            is_markdown = doc_name.lower().endswith('.md') or \
+                          any(marker in doc_content for marker in ['\n# ', '\n## ', '\n### ', '\n#### ', '* ', '- ', '1. '])
 
             try:
                 if is_markdown:
